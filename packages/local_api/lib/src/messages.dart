@@ -107,3 +107,11 @@ int requireInt(JsonMap source, String key) {
   }
   throw FormatException('Expected "$key" to be an integer.');
 }
+
+bool requireBool(JsonMap source, String key) {
+  final Object? value = source[key];
+  if (value is bool) {
+    return value;
+  }
+  throw FormatException('Expected "$key" to be a boolean.');
+}

@@ -121,6 +121,96 @@ void main() {
   });
 
   test(
+    'workspace archive is read-only and delete tombstones local data',
+    () async {
+      final CommandReceipt workspace = await service.createWorkspace(
+        commandId: 'workspace',
+        name: 'Personal',
+      );
+      final String workspaceId = workspace.result['workspace_id']! as String;
+      final CommandReceipt document = await service.createDocument(
+        commandId: 'document',
+        workspaceId: workspaceId,
+        title: 'Local note',
+      );
+      final String documentId = document.result['document_id']! as String;
+
+      final CommandReceipt archived = await service.archiveWorkspace(
+        commandId: 'archive',
+        workspaceId: workspaceId,
+        archived: true,
+        expectedRevision: 1,
+      );
+      expect(archived.result['lifecycle'], 'archived');
+      expect(await service.listWorkspaces(), isEmpty);
+      expect(await service.listWorkspaces(includeArchived: true), hasLength(1));
+      await expectLater(
+        service.createDocument(
+          commandId: 'create-in-archive',
+          workspaceId: workspaceId,
+          title: 'Rejected',
+        ),
+        throwsA(
+          isA<ApplicationException>().having(
+            (ApplicationException error) => error.code,
+            'code',
+            'WorkspaceNotFound',
+          ),
+        ),
+      );
+      await expectLater(
+        service.saveDocument(
+          commandId: 'edit-in-archive',
+          documentId: documentId,
+          title: 'Rejected',
+          blocks: const <BlockDraft>[],
+          expectedRevision: 1,
+        ),
+        throwsA(
+          isA<ApplicationException>().having(
+            (ApplicationException error) => error.code,
+            'code',
+            'WorkspaceNotFound',
+          ),
+        ),
+      );
+
+      final CommandReceipt renamed = await service.renameWorkspace(
+        commandId: 'rename-archive',
+        workspaceId: workspaceId,
+        name: 'Reference',
+        expectedRevision: 2,
+      );
+      final CommandReceipt restored = await service.archiveWorkspace(
+        commandId: 'restore-archive',
+        workspaceId: workspaceId,
+        archived: false,
+        expectedRevision: renamed.result['revision']! as int,
+      );
+      expect(restored.result['lifecycle'], 'active');
+
+      final CommandReceipt deleted = await service.deleteWorkspace(
+        commandId: 'delete-workspace',
+        workspaceId: workspaceId,
+        expectedRevision: restored.result['revision']! as int,
+      );
+      expect(deleted.result['lifecycle'], 'deleted');
+      expect(deleted.result['affected_document_ids'], <String>[documentId]);
+      expect(store.documents[documentId]!.isDeleted, isTrue);
+      expect(store.searchProjections, isEmpty);
+      expect(await service.listWorkspaces(includeArchived: true), isEmpty);
+      expect(
+        (await service.deleteWorkspace(
+          commandId: 'delete-workspace',
+          workspaceId: workspaceId,
+          expectedRevision: restored.result['revision']! as int,
+        )).wasReplay,
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'deleting a parent tombstones its subtree and restores in order',
     () async {
       final CommandReceipt workspace = await service.createWorkspace(

@@ -8,11 +8,33 @@ abstract interface class EndlessLocalApi {
 
   Future<JsonMap> health();
 
-  Future<List<JsonMap>> listWorkspaces();
+  Future<List<JsonMap>> listWorkspaces({bool includeArchived = false});
+
+  Future<JsonMap> getWorkspace(String workspaceId);
 
   Future<JsonMap> createWorkspace({
     required String commandId,
     required String name,
+  });
+
+  Future<JsonMap> renameWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required String name,
+    int? expectedRevision,
+  });
+
+  Future<JsonMap> archiveWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required bool archived,
+    int? expectedRevision,
+  });
+
+  Future<JsonMap> deleteWorkspace({
+    required String commandId,
+    required String workspaceId,
+    int? expectedRevision,
   });
 
   Future<List<JsonMap>> listDocuments({

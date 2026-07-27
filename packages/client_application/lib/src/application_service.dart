@@ -222,7 +222,7 @@ final class ClientApplicationService {
       objectId: workspaceId,
       baseRevision: expectedRevision ?? 0,
       transition: (ClientStoreWriter writer) async {
-        final Workspace workspace = await _requireWorkspace(
+        final Workspace workspace = await _requireVisibleWorkspace(
           writer,
           workspaceId,
         );
@@ -236,6 +236,87 @@ final class ClientApplicationService {
       },
     );
   }
+
+  Future<CommandReceipt> archiveWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required bool archived,
+    int? expectedRevision,
+  }) => _execute(
+    commandId: commandId,
+    method: 'ArchiveWorkspace',
+    fingerprintPayload: <String, Object?>{
+      'workspace_id': workspaceId,
+      'archived': archived,
+      'expected_revision': expectedRevision,
+    },
+    workspaceId: workspaceId,
+    objectId: workspaceId,
+    baseRevision: expectedRevision ?? 0,
+    transition: (ClientStoreWriter writer) async {
+      final Workspace workspace = await _requireVisibleWorkspace(
+        writer,
+        workspaceId,
+      );
+      _checkRevision(workspace.revision, expectedRevision);
+      final WorkspaceLifecycle target = archived
+          ? WorkspaceLifecycle.archived
+          : WorkspaceLifecycle.active;
+      if (workspace.lifecycle == target) {
+        throw const ApplicationException(
+          'InvalidArgument',
+          'Workspace already has the requested lifecycle.',
+        );
+      }
+      final Workspace updated = workspace.changeLifecycle(target, _clock.now());
+      await writer.putWorkspace(updated);
+      return updated.toJson();
+    },
+  );
+
+  Future<CommandReceipt> deleteWorkspace({
+    required String commandId,
+    required String workspaceId,
+    int? expectedRevision,
+  }) => _execute(
+    commandId: commandId,
+    method: 'DeleteWorkspace',
+    fingerprintPayload: <String, Object?>{
+      'workspace_id': workspaceId,
+      'expected_revision': expectedRevision,
+    },
+    workspaceId: workspaceId,
+    objectId: workspaceId,
+    baseRevision: expectedRevision ?? 0,
+    transition: (ClientStoreWriter writer) async {
+      final Workspace workspace = await _requireVisibleWorkspace(
+        writer,
+        workspaceId,
+      );
+      _checkRevision(workspace.revision, expectedRevision);
+      final DateTime now = _clock.now();
+      final Workspace deleted = workspace.changeLifecycle(
+        WorkspaceLifecycle.deleted,
+        now,
+      );
+      await writer.putWorkspace(deleted);
+      final List<String> affectedDocumentIds = <String>[];
+      for (final Document document in await writer.listDocuments(
+        workspaceId,
+        includeDeleted: true,
+      )) {
+        if (!document.isDeleted) {
+          await writer.putDocument(document.markDeleted(true, now));
+          affectedDocumentIds.add(document.id);
+        }
+        await writer.removeSearchProjection(document.id);
+      }
+      return <String, Object?>{
+        ...deleted.toJson(),
+        'affected_document_ids': affectedDocumentIds,
+      };
+    },
+  );
 
   Future<CommandReceipt> createDocument({
     required String commandId,
@@ -327,6 +408,7 @@ final class ClientApplicationService {
       baseRevision: expectedRevision ?? 0,
       transition: (ClientStoreWriter writer) async {
         final Document document = await _requireDocument(writer, documentId);
+        await _requireWorkspace(writer, document.workspaceId);
         if (document.isDeleted) {
           throw const ApplicationException(
             'DocumentNotFound',
@@ -385,6 +467,7 @@ final class ClientApplicationService {
       baseRevision: expectedRevision ?? 0,
       transition: (ClientStoreWriter writer) async {
         final Document document = await _requireDocument(writer, documentId);
+        await _requireWorkspace(writer, document.workspaceId);
         _checkRevision(document.revision, expectedRevision);
         await _validateParent(writer, document, parentId);
         final Document updated = document.move(
@@ -438,6 +521,7 @@ final class ClientApplicationService {
     baseRevision: expectedRevision ?? 0,
     transition: (ClientStoreWriter writer) async {
       final Document document = await _requireDocument(writer, documentId);
+      await _requireWorkspace(writer, document.workspaceId);
       _checkRevision(document.revision, expectedRevision);
       if (document.isDeleted == deleted) {
         throw ApplicationException(
@@ -619,6 +703,21 @@ final class ClientApplicationService {
       throw const ApplicationException(
         'WorkspaceNotFound',
         'Active workspace was not found.',
+      );
+    }
+    return workspace;
+  }
+
+  static Future<Workspace> _requireVisibleWorkspace(
+    ClientStoreReader reader,
+    String workspaceId,
+  ) async {
+    final Workspace? workspace = await reader.getWorkspace(workspaceId);
+    if (workspace == null ||
+        workspace.lifecycle == WorkspaceLifecycle.deleted) {
+      throw const ApplicationException(
+        'WorkspaceNotFound',
+        'Workspace was not found.',
       );
     }
     return workspace;

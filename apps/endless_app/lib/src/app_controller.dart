@@ -62,6 +62,22 @@ final class AppController extends ChangeNotifier {
 
   bool get hasSearch => searchQuery.isNotEmpty;
 
+  JsonMap? get selectedWorkspace {
+    final String? id = selectedWorkspaceId;
+    if (id == null) {
+      return null;
+    }
+    for (final JsonMap workspace in workspaces) {
+      if (workspace['workspace_id'] == id) {
+        return workspace;
+      }
+    }
+    return null;
+  }
+
+  bool get isSelectedWorkspaceWritable =>
+      selectedWorkspace?['lifecycle'] == 'active';
+
   JsonMap? get selectedDocument {
     final String? id = selectedDocumentId;
     if (id == null) {
@@ -201,7 +217,7 @@ final class AppController extends ChangeNotifier {
 
   Future<void> _loadWorkspaces() async {
     workspaces = await _withReconnect(
-      (EndlessLocalApi client) => client.listWorkspaces(),
+      (EndlessLocalApi client) => client.listWorkspaces(includeArchived: true),
     );
     if (workspaces.isEmpty) {
       selectedWorkspaceId = null;
@@ -215,7 +231,13 @@ final class AppController extends ChangeNotifier {
     );
     selectedWorkspaceId = selectedStillExists
         ? selectedWorkspaceId
-        : requireString(workspaces.first, 'workspace_id');
+        : requireString(
+            workspaces.firstWhere(
+              (JsonMap workspace) => workspace['lifecycle'] == 'active',
+              orElse: () => workspaces.first,
+            ),
+            'workspace_id',
+          );
     await _loadDocuments();
   }
 
@@ -294,11 +316,76 @@ final class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> renameSelectedWorkspace(String name) async {
+    await flushPendingChanges();
+    final JsonMap? workspace = selectedWorkspace;
+    if (workspace == null) {
+      return;
+    }
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.renameWorkspace(
+        commandId: commandId,
+        workspaceId: requireString(workspace, 'workspace_id'),
+        name: name,
+        expectedRevision: requireInt(workspace, 'revision'),
+      ),
+    );
+    await _loadWorkspaces();
+    notifyListeners();
+  }
+
+  Future<void> setSelectedWorkspaceArchived(bool archived) async {
+    await flushPendingChanges();
+    final JsonMap? workspace = selectedWorkspace;
+    if (workspace == null) {
+      return;
+    }
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.archiveWorkspace(
+        commandId: commandId,
+        workspaceId: requireString(workspace, 'workspace_id'),
+        archived: archived,
+        expectedRevision: requireInt(workspace, 'revision'),
+      ),
+    );
+    showRecycleBin = false;
+    _clearSearchState();
+    await _loadWorkspaces();
+    notifyListeners();
+  }
+
+  Future<void> deleteSelectedWorkspace() async {
+    await flushPendingChanges();
+    final JsonMap? workspace = selectedWorkspace;
+    if (workspace == null) {
+      return;
+    }
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.deleteWorkspace(
+        commandId: commandId,
+        workspaceId: requireString(workspace, 'workspace_id'),
+        expectedRevision: requireInt(workspace, 'revision'),
+      ),
+    );
+    selectedWorkspaceId = null;
+    selectedDocumentId = null;
+    showRecycleBin = false;
+    _clearSearchState();
+    await _loadWorkspaces();
+    notifyListeners();
+  }
+
   Future<void> createDocument(String title, {String? parentId}) async {
     await flushPendingChanges();
     final String? workspaceId = selectedWorkspaceId;
     if (workspaceId == null) {
       throw StateError('Select a workspace first.');
+    }
+    if (!isSelectedWorkspaceWritable) {
+      throw StateError('Archived workspace is read-only.');
     }
     final String commandId = _commandId();
     final JsonMap created = await _withReconnect(

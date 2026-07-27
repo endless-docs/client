@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:endless_app/src/app_controller.dart';
 import 'package:endless_app/src/endless_app.dart';
@@ -67,6 +68,49 @@ void main() {
 
     expect(api.savedTextByDocument[firstId], 'Не потерять при переходе');
     expect(controller.selectedDocumentId, secondId);
+  });
+
+  testWidgets('flushes pending text before a desktop exit request', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Перед выходом');
+    final String documentId = controller.selectedDocumentId!;
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, 'Сохранить при выходе');
+    final AppExitResponse response = await tester.binding
+        .handleRequestAppExit();
+    await tester.pumpAndSettle();
+
+    expect(response, AppExitResponse.exit);
+    expect(api.savedTextByDocument[documentId], 'Сохранить при выходе');
+  });
+
+  testWidgets('cancels a desktop exit when pending state cannot commit', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    final Object failingEditor = Object();
+    controller.attachEditor(
+      failingEditor,
+      () async => throw StateError('local commit failed'),
+    );
+
+    final AppExitResponse response = await tester.binding
+        .handleRequestAppExit();
+
+    expect(response, AppExitResponse.cancel);
+    controller.detachEditor(failingEditor);
   });
 
   testWidgets('renders a tree and restores documents from recycle bin', (
@@ -163,6 +207,37 @@ void main() {
     expect(find.byTooltip('Очистить поиск'), findsOneWidget);
   });
 
+  testWidgets('archives workspace as read-only and restores or deletes it', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Заметка');
+
+    await controller.setSelectedWorkspaceArchived(true);
+    await tester.pumpAndSettle();
+    expect(controller.isSelectedWorkspaceWritable, isFalse);
+    expect(find.text('Личное (архив)'), findsOneWidget);
+    expect(find.text('Только чтение'), findsOneWidget);
+
+    await controller.renameSelectedWorkspace('Справочник');
+    await controller.setSelectedWorkspaceArchived(false);
+    await tester.pumpAndSettle();
+    expect(controller.isSelectedWorkspaceWritable, isTrue);
+    expect(find.text('Справочник'), findsOneWidget);
+
+    await controller.deleteSelectedWorkspace();
+    await tester.pumpAndSettle();
+    expect(controller.workspaces, isEmpty);
+    expect(controller.documents, isEmpty);
+    expect(api._documents.single['is_deleted'], isTrue);
+    expect(find.text('Создайте локальное пространство'), findsOneWidget);
+  });
+
   testWidgets('shows a recoverable startup error', (WidgetTester tester) async {
     final AppController controller = AppController(
       bootstrap: () async => throw const LocalApiException(
@@ -207,6 +282,81 @@ final class _FakeLocalApi implements EndlessLocalApi {
     };
     _workspaces.add(workspace);
     return workspace;
+  }
+
+  @override
+  Future<JsonMap> getWorkspace(String workspaceId) async =>
+      _workspaces.firstWhere(
+        (JsonMap workspace) => workspace['workspace_id'] == workspaceId,
+      );
+
+  @override
+  Future<JsonMap> renameWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required String name,
+    int? expectedRevision,
+  }) async {
+    final int index = _workspaces.indexWhere(
+      (JsonMap workspace) => workspace['workspace_id'] == workspaceId,
+    );
+    final JsonMap renamed = <String, Object?>{
+      ..._workspaces[index],
+      'name': name,
+      'revision': requireInt(_workspaces[index], 'revision') + 1,
+    };
+    _workspaces[index] = renamed;
+    return renamed;
+  }
+
+  @override
+  Future<JsonMap> archiveWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required bool archived,
+    int? expectedRevision,
+  }) async {
+    final int index = _workspaces.indexWhere(
+      (JsonMap workspace) => workspace['workspace_id'] == workspaceId,
+    );
+    final JsonMap changed = <String, Object?>{
+      ..._workspaces[index],
+      'lifecycle': archived ? 'archived' : 'active',
+      'revision': requireInt(_workspaces[index], 'revision') + 1,
+    };
+    _workspaces[index] = changed;
+    return changed;
+  }
+
+  @override
+  Future<JsonMap> deleteWorkspace({
+    required String commandId,
+    required String workspaceId,
+    int? expectedRevision,
+  }) async {
+    final int index = _workspaces.indexWhere(
+      (JsonMap workspace) => workspace['workspace_id'] == workspaceId,
+    );
+    final JsonMap deleted = <String, Object?>{
+      ..._workspaces[index],
+      'lifecycle': 'deleted',
+      'revision': requireInt(_workspaces[index], 'revision') + 1,
+    };
+    _workspaces[index] = deleted;
+    for (
+      int documentIndex = 0;
+      documentIndex < _documents.length;
+      documentIndex++
+    ) {
+      if (_documents[documentIndex]['workspace_id'] == workspaceId) {
+        _documents[documentIndex] = <String, Object?>{
+          ..._documents[documentIndex],
+          'is_deleted': true,
+          'revision': requireInt(_documents[documentIndex], 'revision') + 1,
+        };
+      }
+    }
+    return deleted;
   }
 
   @override
@@ -340,8 +490,15 @@ final class _FakeLocalApi implements EndlessLocalApi {
       .toList();
 
   @override
-  Future<List<JsonMap>> listWorkspaces() async =>
-      _workspaces.map(Map<String, Object?>.of).toList();
+  Future<List<JsonMap>> listWorkspaces({bool includeArchived = false}) async =>
+      _workspaces
+          .where(
+            (JsonMap workspace) =>
+                workspace['lifecycle'] != 'deleted' &&
+                (includeArchived || workspace['lifecycle'] == 'active'),
+          )
+          .map(Map<String, Object?>.of)
+          .toList();
 
   @override
   Future<JsonMap> moveDocument({

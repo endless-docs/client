@@ -38,10 +38,19 @@ final class HttpLocalApiClient implements EndlessLocalApi {
   Future<JsonMap> health() => _post('/v1/health', const <String, Object?>{});
 
   @override
-  Future<List<JsonMap>> listWorkspaces() async {
-    final JsonMap data = await _query('ListWorkspaces');
+  Future<List<JsonMap>> listWorkspaces({bool includeArchived = false}) async {
+    final JsonMap data = await _query(
+      'ListWorkspaces',
+      payload: <String, Object?>{'include_archived': includeArchived},
+    );
     return requireMapList(data, 'workspaces');
   }
+
+  @override
+  Future<JsonMap> getWorkspace(String workspaceId) => _query(
+    'GetWorkspace',
+    payload: <String, Object?>{'workspace_id': workspaceId},
+  );
 
   @override
   Future<JsonMap> createWorkspace({
@@ -51,6 +60,52 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     commandId: commandId,
     method: 'CreateWorkspace',
     payload: <String, Object?>{'name': name},
+  );
+
+  @override
+  Future<JsonMap> renameWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required String name,
+    int? expectedRevision,
+  }) => _command(
+    commandId: commandId,
+    method: 'RenameWorkspace',
+    payload: <String, Object?>{
+      'workspace_id': workspaceId,
+      'name': name,
+      'expected_revision': expectedRevision,
+    },
+  );
+
+  @override
+  Future<JsonMap> archiveWorkspace({
+    required String commandId,
+    required String workspaceId,
+    required bool archived,
+    int? expectedRevision,
+  }) => _command(
+    commandId: commandId,
+    method: 'ArchiveWorkspace',
+    payload: <String, Object?>{
+      'workspace_id': workspaceId,
+      'archived': archived,
+      'expected_revision': expectedRevision,
+    },
+  );
+
+  @override
+  Future<JsonMap> deleteWorkspace({
+    required String commandId,
+    required String workspaceId,
+    int? expectedRevision,
+  }) => _command(
+    commandId: commandId,
+    method: 'DeleteWorkspace',
+    payload: <String, Object?>{
+      'workspace_id': workspaceId,
+      'expected_revision': expectedRevision,
+    },
   );
 
   @override

@@ -11,3 +11,12 @@ endless search WORKSPACE_ID QUERY
 endless search-index status
 endless search-index rebuild
 ```
+
+Workspace lifecycle commands:
+
+```text
+endless workspace rename WORKSPACE_ID NAME
+endless workspace archive WORKSPACE_ID
+endless workspace restore WORKSPACE_ID
+endless workspace delete WORKSPACE_ID
+```

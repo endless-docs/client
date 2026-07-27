@@ -254,10 +254,13 @@ final class LocaldServer {
     final JsonMap payload = requireMap(body, 'payload');
     return switch (method) {
       'ListWorkspaces' => <String, Object?>{
-        'workspaces': (await _application.listWorkspaces())
-            .map((Workspace workspace) => workspace.toJson())
-            .toList(),
+        'workspaces': (await _application.listWorkspaces(
+          includeArchived: payload['include_archived'] == true,
+        )).map((Workspace workspace) => workspace.toJson()).toList(),
       },
+      'GetWorkspace' => (await _application.getWorkspace(
+        requireString(payload, 'workspace_id'),
+      )).toJson(),
       'ListDocumentTree' => <String, Object?>{
         'documents': (await _application.listDocuments(
           requireString(payload, 'workspace_id'),
@@ -302,6 +305,17 @@ final class LocaldServer {
         commandId: commandId,
         workspaceId: requireString(payload, 'workspace_id'),
         name: requireString(payload, 'name'),
+        expectedRevision: payload['expected_revision'] as int?,
+      ),
+      'ArchiveWorkspace' => await _application.archiveWorkspace(
+        commandId: commandId,
+        workspaceId: requireString(payload, 'workspace_id'),
+        archived: requireBool(payload, 'archived'),
+        expectedRevision: payload['expected_revision'] as int?,
+      ),
+      'DeleteWorkspace' => await _application.deleteWorkspace(
+        commandId: commandId,
+        workspaceId: requireString(payload, 'workspace_id'),
         expectedRevision: payload['expected_revision'] as int?,
       ),
       'CreateDocument' => await _application.createDocument(

@@ -11,4 +11,6 @@ flutter run -d windows
 
 The app discovers or starts `locald` and remains usable without a cloud server.
 Document navigation flushes pending edits before switching; tree, recycle and
-restore operations use the same Local API boundary.
+restore operations use the same Local API boundary. Workspace lifecycle has a
+read-only archive mode, and a desktop exit request is cancelled if pending
+editor state cannot be committed locally.

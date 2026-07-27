@@ -46,6 +46,10 @@ Flutter UI / CLI
 - document revision conflict не оставляет partial state;
 - pending editor state flushes before navigation, а availability retry сохраняет
   исходный `command_id`;
+- desktop exit request flushes pending editor state и отменяет закрытие при
+  ошибке durable commit;
+- workspace rename/archive/read-only restore/delete lifecycle использует ту же
+  command pipeline; delete атомарно tombstone-ит документы и очищает search;
 - document tree move и subtree delete/recycle/ordered restore проходят через тот
   же application pipeline;
 - search projection обновляется в domain transaction, исключает tombstones,
@@ -77,20 +81,21 @@ application, Local API, runtime, real Isar, `locald` HTTP и Flutter widget test
 Bundle появляется в `dist/endless-windows-x64`. Isar native library загружается
 только как build input и включается рядом с `locald.exe`; runtime download
 отсутствует. Smoke блокирует внешний proxy, создаёт данные packaged CLI,
-  принудительно завершает bundled `locald` и проверяет чтение и local search
-  после cold restart, затем выполняет search rebuild.
+проверяет workspace lifecycle, принудительно завершает bundled `locald` и
+проверяет чтение и local search после cold restart, затем выполняет search
+rebuild.
 
 ## Acceptance evidence
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
 | Start without network/account | Packaged UI/CLI bootstrap uses bundled `locald` and Isar; no identity code | Proven for Windows vertical slice |
-| Workspace/document workflow | Widget + application + `locald` integration tests | Proven for create/read/edit/move/subtree delete/restore |
+| Workspace/document workflow | Widget + application + `locald` integration tests | Proven for workspace rename/archive/restore/delete and document create/read/edit/move/subtree delete/restore |
 | Only `locald` opens Isar | Import checker and package graph | Proven |
 | Durable acknowledgement | Isar close/reopen and packaged forced-restart smoke | Proven for implemented mutations |
 | Command idempotency | Application and `locald` replay tests | Proven |
 | Operation atomicity | Same Isar transaction adapter + rollback/replay tests | Partial: additional write-step fault injection required |
-| Offline editor recovery | Autosave, flush-before-navigation and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
+| Offline editor recovery | Autosave, flush-before-navigation, exit-request flush and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
 | Rebuildable local search | Application update/delete/restore/rebuild tests, real Isar/locald post-upgrade repair and cold-reopen tests, widget result UX and packaged smoke | Proven for correctness; 10k/100k benchmark and D6 decision pending |
 | Release build | Windows release bundle build script | Proven; installer/signing not implemented |
 
@@ -98,8 +103,7 @@ Bundle появляется в `dist/endless-windows-x64`. Isar native library �
 
 Полная Client MVP пока не достигнута. Обязательные следующие work packages:
 
-1. Complete workspace rename/archive/delete lifecycle, multi-block editor и
-   window-close flush.
+1. Multi-block editor после решения D5.
 2. Managed attachments со staging journal и traversal/symlink corpus.
 3. Versioned import/export и backup/restore с clean-profile round trip.
 4. MCP adapter, scopes, approval и audit.

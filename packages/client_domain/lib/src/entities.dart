@@ -28,6 +28,16 @@ final class Workspace {
     updatedAt: now,
   );
 
+  Workspace changeLifecycle(WorkspaceLifecycle value, DateTime now) =>
+      Workspace(
+        id: id,
+        name: name,
+        lifecycle: value,
+        revision: revision + 1,
+        createdAt: createdAt,
+        updatedAt: now,
+      );
+
   Map<String, Object?> toJson() => <String, Object?>{
     'workspace_id': id,
     'name': name,

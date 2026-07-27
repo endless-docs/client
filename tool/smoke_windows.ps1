@@ -64,6 +64,12 @@ $env:NO_PROXY = ''
 try {
     $health = Invoke-CliJson @('health')
     $workspace = Invoke-CliJson @('workspace', 'create', 'Smoke')
+    $workspace = Invoke-CliJson @(
+        'workspace',
+        'rename',
+        $workspace.workspace_id,
+        'SmokeRenamed'
+    )
     $document = Invoke-CliJson @(
         'document',
         'create',
@@ -96,6 +102,16 @@ try {
         'document',
         'restore',
         $child.document_id
+    )
+    $null = Invoke-CliJson @(
+        'workspace',
+        'archive',
+        $workspace.workspace_id
+    )
+    $null = Invoke-CliJson @(
+        'workspace',
+        'restore',
+        $workspace.workspace_id
     )
     $searchBefore = @(
         Invoke-CliJson @(
@@ -142,6 +158,7 @@ try {
         Workspace = $workspace.name
         Document = $restored.title
         TreeRecycle = $true
+        WorkspaceLifecycle = $true
         LocalSearch = $true
         SearchRebuild = $true
         ColdRestart = $true

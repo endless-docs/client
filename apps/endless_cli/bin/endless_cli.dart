@@ -62,7 +62,7 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
   if (command.length == 2 &&
       command[0] == 'workspace' &&
       command[1] == 'list') {
-    return client.listWorkspaces();
+    return client.listWorkspaces(includeArchived: true);
   }
   if (command.length >= 3 &&
       command[0] == 'workspace' &&
@@ -70,6 +70,41 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
     return client.createWorkspace(
       commandId: _commandId(),
       name: command.sublist(2).join(' '),
+    );
+  }
+  if (command.length == 3 && command[0] == 'workspace' && command[1] == 'get') {
+    return client.getWorkspace(command[2]);
+  }
+  if (command.length >= 4 &&
+      command[0] == 'workspace' &&
+      command[1] == 'rename') {
+    final JsonMap workspace = await client.getWorkspace(command[2]);
+    return client.renameWorkspace(
+      commandId: _commandId(),
+      workspaceId: command[2],
+      name: command.sublist(3).join(' '),
+      expectedRevision: requireInt(workspace, 'revision'),
+    );
+  }
+  if (command.length == 3 &&
+      command[0] == 'workspace' &&
+      <String>{'archive', 'restore'}.contains(command[1])) {
+    final JsonMap workspace = await client.getWorkspace(command[2]);
+    return client.archiveWorkspace(
+      commandId: _commandId(),
+      workspaceId: command[2],
+      archived: command[1] == 'archive',
+      expectedRevision: requireInt(workspace, 'revision'),
+    );
+  }
+  if (command.length == 3 &&
+      command[0] == 'workspace' &&
+      command[1] == 'delete') {
+    final JsonMap workspace = await client.getWorkspace(command[2]);
+    return client.deleteWorkspace(
+      commandId: _commandId(),
+      workspaceId: command[2],
+      expectedRevision: requireInt(workspace, 'revision'),
     );
   }
   if (command.length == 3 && command[0] == 'document' && command[1] == 'list') {
@@ -228,6 +263,11 @@ Usage:
   endless [--profile ID] [--profile-root PATH] [--json] health
   endless [options] workspace list
   endless [options] workspace create NAME
+  endless [options] workspace get WORKSPACE_ID
+  endless [options] workspace rename WORKSPACE_ID NAME
+  endless [options] workspace archive WORKSPACE_ID
+  endless [options] workspace restore WORKSPACE_ID
+  endless [options] workspace delete WORKSPACE_ID
   endless [options] document list WORKSPACE_ID
   endless [options] document get DOCUMENT_ID
   endless [options] document create WORKSPACE_ID TITLE

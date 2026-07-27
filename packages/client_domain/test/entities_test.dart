@@ -42,5 +42,26 @@ void main() {
       expect(updated.revision, 2);
       expect(updated.title, 'New');
     });
+
+    test('workspace lifecycle advances revision without changing identity', () {
+      final DateTime created = DateTime.utc(2026, 1, 1);
+      final Workspace workspace = Workspace(
+        id: 'workspace-1',
+        name: 'Personal',
+        lifecycle: WorkspaceLifecycle.active,
+        revision: 1,
+        createdAt: created,
+        updatedAt: created,
+      );
+
+      final Workspace archived = workspace.changeLifecycle(
+        WorkspaceLifecycle.archived,
+        created.add(const Duration(minutes: 1)),
+      );
+
+      expect(archived.id, workspace.id);
+      expect(archived.lifecycle, WorkspaceLifecycle.archived);
+      expect(archived.revision, 2);
+    });
   });
 }

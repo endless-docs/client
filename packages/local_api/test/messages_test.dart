@@ -19,4 +19,15 @@ void main() {
     expect(restored.sessionProof, endpoint.sessionProof);
     expect(restored.baseUri.host, '127.0.0.1');
   });
+
+  test('boolean fields reject ambiguous wire values', () {
+    expect(
+      requireBool(<String, Object?>{'archived': true}, 'archived'),
+      isTrue,
+    );
+    expect(
+      () => requireBool(<String, Object?>{'archived': 'true'}, 'archived'),
+      throwsFormatException,
+    );
+  });
 }

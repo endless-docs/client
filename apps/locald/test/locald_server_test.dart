@@ -197,6 +197,69 @@ void main() {
       final JsonMap repairedStatus = await client.getSearchStatus();
       expect(repairedStatus['is_current'], isTrue);
       expect(repairedStatus['document_count'], 2);
+
+      final JsonMap lifecycleWorkspace = await client.createWorkspace(
+        commandId: 'lifecycle-workspace',
+        name: 'Lifecycle',
+      );
+      final JsonMap lifecycleDocument = await client.createDocument(
+        commandId: 'lifecycle-document',
+        workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+        title: 'Will be tombstoned',
+      );
+      final JsonMap archived = await client.archiveWorkspace(
+        commandId: 'archive-workspace',
+        workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+        archived: true,
+        expectedRevision: 1,
+      );
+      expect(archived['lifecycle'], 'archived');
+      await expectLater(
+        client.createDocument(
+          commandId: 'archive-write-rejected',
+          workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+          title: 'Rejected',
+        ),
+        throwsA(
+          isA<LocalApiException>().having(
+            (LocalApiException error) => error.code,
+            'code',
+            'WorkspaceNotFound',
+          ),
+        ),
+      );
+      final JsonMap renamed = await client.renameWorkspace(
+        commandId: 'rename-archived-workspace',
+        workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+        name: 'Reference',
+        expectedRevision: requireInt(archived, 'revision'),
+      );
+      final JsonMap active = await client.archiveWorkspace(
+        commandId: 'restore-workspace',
+        workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+        archived: false,
+        expectedRevision: requireInt(renamed, 'revision'),
+      );
+      final JsonMap deletedWorkspace = await client.deleteWorkspace(
+        commandId: 'delete-workspace',
+        workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+        expectedRevision: requireInt(active, 'revision'),
+      );
+      expect(deletedWorkspace['lifecycle'], 'deleted');
+      expect(
+        (await client.getDocument(
+          requireString(lifecycleDocument, 'document_id'),
+        ))['is_deleted'],
+        isTrue,
+      );
+      expect(
+        (await client.deleteWorkspace(
+          commandId: 'delete-workspace',
+          workspaceId: requireString(lifecycleWorkspace, 'workspace_id'),
+          expectedRevision: requireInt(active, 'revision'),
+        ))['was_replay'],
+        isTrue,
+      );
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:local_api/local_api.dart';
@@ -34,22 +35,50 @@ final class EndlessApp extends StatelessWidget {
   );
 }
 
-final class _Home extends StatelessWidget {
+final class _Home extends StatefulWidget {
   const _Home({required this.controller});
 
   final AppController controller;
 
   @override
+  State<_Home> createState() => _HomeState();
+}
+
+final class _HomeState extends State<_Home> {
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = AppLifecycleListener(onExitRequested: _flushBeforeExit);
+  }
+
+  Future<AppExitResponse> _flushBeforeExit() async {
+    try {
+      await widget.controller.flushPendingChanges();
+      return AppExitResponse.exit;
+    } on Object {
+      return AppExitResponse.cancel;
+    }
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
+    listenable: widget.controller,
     builder: (BuildContext context, Widget? child) =>
-        switch (controller.phase) {
+        switch (widget.controller.phase) {
           AppPhase.starting => const _StartingView(),
           AppPhase.failed => _FailureView(
-            message: controller.errorMessage ?? 'Неизвестная ошибка',
-            onRetry: controller.initialize,
+            message: widget.controller.errorMessage ?? 'Неизвестная ошибка',
+            onRetry: widget.controller.initialize,
           ),
-          AppPhase.ready => _ReadyView(controller: controller),
+          AppPhase.ready => _ReadyView(controller: widget.controller),
         },
   );
 }
@@ -154,6 +183,7 @@ final class _ReadyView extends StatelessWidget {
                   key: ValueKey<String>(controller.selectedDocumentId!),
                   controller: controller,
                   document: controller.selectedDocument!,
+                  readOnly: !controller.isSelectedWorkspaceWritable,
                 ),
         ),
       ],
@@ -191,7 +221,8 @@ final class _NavigationPane extends StatelessWidget {
                                     'workspace_id',
                                   ),
                                   child: Text(
-                                    requireString(workspace, 'name'),
+                                    '${requireString(workspace, 'name')}'
+                                    '${workspace['lifecycle'] == 'archived' ? ' (архив)' : ''}',
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
@@ -207,6 +238,49 @@ final class _NavigationPane extends StatelessWidget {
                           },
                         ),
                       ),
+              ),
+              PopupMenuButton<_WorkspaceAction>(
+                tooltip: 'Действия с пространством',
+                enabled: controller.selectedWorkspace != null,
+                onSelected: (_WorkspaceAction action) {
+                  switch (action) {
+                    case _WorkspaceAction.rename:
+                      unawaited(_renameWorkspace(context, controller));
+                    case _WorkspaceAction.archive:
+                      unawaited(
+                        _setWorkspaceArchived(context, controller, true),
+                      );
+                    case _WorkspaceAction.restore:
+                      _runUiAction(
+                        context,
+                        () => controller.setSelectedWorkspaceArchived(false),
+                      );
+                    case _WorkspaceAction.delete:
+                      unawaited(_deleteWorkspace(context, controller));
+                  }
+                },
+                itemBuilder: (BuildContext context) =>
+                    <PopupMenuEntry<_WorkspaceAction>>[
+                      const PopupMenuItem<_WorkspaceAction>(
+                        value: _WorkspaceAction.rename,
+                        child: Text('Переименовать'),
+                      ),
+                      if (controller.isSelectedWorkspaceWritable)
+                        const PopupMenuItem<_WorkspaceAction>(
+                          value: _WorkspaceAction.archive,
+                          child: Text('Архивировать'),
+                        )
+                      else
+                        const PopupMenuItem<_WorkspaceAction>(
+                          value: _WorkspaceAction.restore,
+                          child: Text('Вернуть из архива'),
+                        ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem<_WorkspaceAction>(
+                        value: _WorkspaceAction.delete,
+                        child: Text('Удалить пространство'),
+                      ),
+                    ],
               ),
               IconButton(
                 tooltip: 'Новое пространство',
@@ -257,7 +331,8 @@ final class _NavigationPane extends StatelessWidget {
                 tooltip: 'Новый документ',
                 onPressed:
                     controller.selectedWorkspaceId == null ||
-                        controller.showRecycleBin
+                        controller.showRecycleBin ||
+                        !controller.isSelectedWorkspaceWritable
                     ? null
                     : () => _createDocument(context, controller),
                 icon: const Icon(Icons.note_add_outlined),
@@ -271,11 +346,13 @@ final class _NavigationPane extends StatelessWidget {
               : controller.hasSearch
               ? _SearchResults(controller: controller)
               : controller.activeDocuments.isEmpty
-              ? const Center(
+              ? Center(
                   child: Padding(
-                    padding: EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(24),
                     child: Text(
-                      'Создайте первый документ — интернет не требуется.',
+                      controller.isSelectedWorkspaceWritable
+                          ? 'Создайте первый документ — интернет не требуется.'
+                          : 'Архивное пространство доступно только для чтения.',
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -306,42 +383,50 @@ final class _NavigationPane extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: PopupMenuButton<String>(
-                        tooltip: 'Действия с документом',
-                        onSelected: (String action) {
-                          if (action == 'child') {
-                            unawaited(
-                              _createDocument(
-                                context,
-                                controller,
-                                parentId: id,
-                              ),
-                            );
-                          } else if (action == 'move') {
-                            unawaited(
-                              _moveDocument(context, controller, document),
-                            );
-                          } else if (action == 'delete') {
-                            unawaited(_deleteDocument(context, controller, id));
-                          }
-                        },
-                        itemBuilder: (BuildContext context) =>
-                            const <PopupMenuEntry<String>>[
-                              PopupMenuItem<String>(
-                                value: 'child',
-                                child: Text('Создать вложенный'),
-                              ),
-                              PopupMenuItem<String>(
-                                value: 'move',
-                                child: Text('Переместить'),
-                              ),
-                              PopupMenuDivider(),
-                              PopupMenuItem<String>(
-                                value: 'delete',
-                                child: Text('Удалить'),
-                              ),
-                            ],
-                      ),
+                      trailing: controller.isSelectedWorkspaceWritable
+                          ? PopupMenuButton<String>(
+                              tooltip: 'Действия с документом',
+                              onSelected: (String action) {
+                                if (action == 'child') {
+                                  unawaited(
+                                    _createDocument(
+                                      context,
+                                      controller,
+                                      parentId: id,
+                                    ),
+                                  );
+                                } else if (action == 'move') {
+                                  unawaited(
+                                    _moveDocument(
+                                      context,
+                                      controller,
+                                      document,
+                                    ),
+                                  );
+                                } else if (action == 'delete') {
+                                  unawaited(
+                                    _deleteDocument(context, controller, id),
+                                  );
+                                }
+                              },
+                              itemBuilder: (BuildContext context) =>
+                                  const <PopupMenuEntry<String>>[
+                                    PopupMenuItem<String>(
+                                      value: 'child',
+                                      child: Text('Создать вложенный'),
+                                    ),
+                                    PopupMenuItem<String>(
+                                      value: 'move',
+                                      child: Text('Переместить'),
+                                    ),
+                                    PopupMenuDivider(),
+                                    PopupMenuItem<String>(
+                                      value: 'delete',
+                                      child: Text('Удалить'),
+                                    ),
+                                  ],
+                            )
+                          : null,
                       onTap: () => _runUiAction(
                         context,
                         () => controller.selectDocument(id),
@@ -517,8 +602,12 @@ final class _RecycleList extends StatelessWidget {
           ),
           trailing: IconButton(
             tooltip: 'Восстановить документ',
-            onPressed: () =>
-                _runUiAction(context, () => controller.restoreDocument(id)),
+            onPressed: controller.isSelectedWorkspaceWritable
+                ? () => _runUiAction(
+                    context,
+                    () => controller.restoreDocument(id),
+                  )
+                : null,
             icon: const Icon(Icons.restore),
           ),
         );
@@ -567,49 +656,67 @@ final class _EmptyDocumentView extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(
-          Icons.edit_note_rounded,
-          size: 72,
-          color: Theme.of(context).colorScheme.outline,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          controller.selectedWorkspaceId == null
-              ? 'Создайте локальное пространство'
-              : 'Выберите или создайте документ',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 20),
-        FilledButton(
-          onPressed: controller.selectedWorkspaceId == null
-              ? () => _createWorkspace(context, controller)
-              : () => _createDocument(context, controller),
-          child: Text(
-            controller.selectedWorkspaceId == null
-                ? 'Создать пространство'
-                : 'Создать документ',
+  Widget build(BuildContext context) {
+    final bool noWorkspace = controller.selectedWorkspaceId == null;
+    final bool archived =
+        !noWorkspace && !controller.isSelectedWorkspaceWritable;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.edit_note_rounded,
+            size: 72,
+            color: Theme.of(context).colorScheme.outline,
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 16),
+          Text(
+            noWorkspace
+                ? 'Создайте локальное пространство'
+                : archived
+                ? 'Пространство находится в архиве'
+                : 'Выберите или создайте документ',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: noWorkspace
+                ? () => _createWorkspace(context, controller)
+                : archived
+                ? () => _runUiAction(
+                    context,
+                    () => controller.setSelectedWorkspaceArchived(false),
+                  )
+                : () => _createDocument(context, controller),
+            child: Text(
+              noWorkspace
+                  ? 'Создать пространство'
+                  : archived
+                  ? 'Вернуть из архива'
+                  : 'Создать документ',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 enum _SaveState { saved, pending, saving, failed, conflict }
+
+enum _WorkspaceAction { rename, archive, restore, delete }
 
 final class DocumentEditor extends StatefulWidget {
   const DocumentEditor({
     required this.controller,
     required this.document,
+    required this.readOnly,
     super.key,
   });
 
   final AppController controller;
   final JsonMap document;
+  final bool readOnly;
 
   @override
   State<DocumentEditor> createState() => _DocumentEditorState();
@@ -773,7 +880,8 @@ final class _DocumentEditorState extends State<DocumentEditor> {
             Expanded(
               child: TextField(
                 controller: _title,
-                onChanged: _changed,
+                readOnly: widget.readOnly,
+                onChanged: widget.readOnly ? null : _changed,
                 style: Theme.of(context).textTheme.headlineMedium,
                 decoration: const InputDecoration(
                   hintText: 'Название',
@@ -781,17 +889,24 @@ final class _DocumentEditorState extends State<DocumentEditor> {
                 ),
               ),
             ),
-            _SaveIndicator(state: _state, onSave: _save),
+            if (widget.readOnly)
+              const Chip(
+                avatar: Icon(Icons.archive_outlined, size: 18),
+                label: Text('Только чтение'),
+              )
+            else
+              _SaveIndicator(state: _state, onSave: _save),
             const SizedBox(width: 8),
-            IconButton(
-              tooltip: 'Удалить документ',
-              onPressed: () => _deleteDocument(
-                context,
-                widget.controller,
-                requireString(widget.document, 'document_id'),
+            if (!widget.readOnly)
+              IconButton(
+                tooltip: 'Удалить документ',
+                onPressed: () => _deleteDocument(
+                  context,
+                  widget.controller,
+                  requireString(widget.document, 'document_id'),
+                ),
+                icon: const Icon(Icons.delete_outline),
               ),
-              icon: const Icon(Icons.delete_outline),
-            ),
           ],
         ),
         if (_state == _SaveState.conflict)
@@ -810,7 +925,8 @@ final class _DocumentEditorState extends State<DocumentEditor> {
         Expanded(
           child: TextField(
             controller: _content,
-            onChanged: _changed,
+            readOnly: widget.readOnly,
+            onChanged: widget.readOnly ? null : _changed,
             expands: true,
             maxLines: null,
             minLines: null,
@@ -874,6 +990,65 @@ Future<void> _createWorkspace(
   );
   if (name != null && name.trim().isNotEmpty && context.mounted) {
     _runUiAction(context, () => controller.createWorkspace(name));
+  }
+}
+
+Future<void> _renameWorkspace(
+  BuildContext context,
+  AppController controller,
+) async {
+  final JsonMap? workspace = controller.selectedWorkspace;
+  if (workspace == null) {
+    return;
+  }
+  final String? name = await _askText(
+    context,
+    title: 'Переименовать пространство',
+    hint: requireString(workspace, 'name'),
+  );
+  if (name != null && name.trim().isNotEmpty && context.mounted) {
+    await _runUiActionAsync(
+      context,
+      () => controller.renameSelectedWorkspace(name),
+    );
+  }
+}
+
+Future<void> _setWorkspaceArchived(
+  BuildContext context,
+  AppController controller,
+  bool archived,
+) => _runUiActionAsync(
+  context,
+  () => controller.setSelectedWorkspaceArchived(archived),
+);
+
+Future<void> _deleteWorkspace(
+  BuildContext context,
+  AppController controller,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: const Text('Удалить пространство?'),
+      content: const Text(
+        'Все документы пространства будут удалены локально. '
+        'Это действие нельзя отменить в приложении.',
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Удалить'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) {
+    await _runUiActionAsync(context, controller.deleteSelectedWorkspace);
   }
 }
 
