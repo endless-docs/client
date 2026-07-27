@@ -17,7 +17,11 @@ Tasks may be assigned by the Codex project for the `architecture` repository. Im
 
 At the current project phase, all repository changes must be pushed directly to `main` without workflow restrictions.
 
-- After completing any change, immediately commit the intended working tree changes and push them to `origin/main`.
+- At the end of every task that produces repository changes, immediately commit all intended changes and push the commit to `origin/main` before reporting the task as complete.
+- Do not batch changes from multiple completed tasks into a later commit.
+- Every commit message must follow Conventional Commits 1.0.0 using `<type>[optional scope]: <description>`.
+- Use an appropriate lowercase type such as `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `perf`, or `revert`; keep the description concise and imperative.
+- Mark breaking changes with `!` before the colon and explain them in a `BREAKING CHANGE:` footer when applicable.
 - Do not create feature branches or Pull Requests.
 - Do not wait for reviews, approvals, CI checks, or other workflow gates before pushing.
 - This temporary rule overrides repository documentation that requires branches, Pull Requests, reviews, approvals, or pre-push checks until the user explicitly changes this policy.
