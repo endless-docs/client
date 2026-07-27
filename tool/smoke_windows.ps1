@@ -225,7 +225,7 @@ try {
     $backupRestore = Invoke-CliJsonForProfile `
         -ProfileRoot $restoreRoot `
         -Arguments @('backup', 'restore', $backupPath)
-    if ($backupRestore.format_version -ne 1) {
+    if ($backupRestore.format_version -ne 2) {
         throw 'Packaged backup restore returned an unexpected version.'
     }
     $restoredSearch = @(

@@ -3,12 +3,22 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:codex_app_server/codex_app_server.dart';
 import 'package:flutter/foundation.dart';
 import 'package:local_api/local_api.dart';
 import 'package:local_api_client/local_api_client.dart';
 import 'package:platform_runtime/platform_runtime.dart';
 
 enum AppPhase { starting, ready, failed }
+
+enum AiMessageRole { user, assistant }
+
+final class AiConversationMessage {
+  const AiConversationMessage({required this.role, required this.text});
+
+  final AiMessageRole role;
+  final String text;
+}
 
 typedef LocalApiBootstrap = Future<EndlessLocalApi> Function();
 
@@ -20,10 +30,12 @@ final class DocumentTreeEntry {
 }
 
 final class AppController extends ChangeNotifier {
-  AppController({required LocalApiBootstrap bootstrap})
-    : _bootstrap = bootstrap;
+  AppController({required LocalApiBootstrap bootstrap, DocumentAi? documentAi})
+    : _bootstrap = bootstrap,
+      _documentAi = documentAi;
 
   factory AppController.production() => AppController(
+    documentAi: CodexDocumentAi(),
     bootstrap: () async {
       const String profileId = 'default';
       final EndpointManifest endpoint = await const LocaldDiscovery()
@@ -43,6 +55,7 @@ final class AppController extends ChangeNotifier {
   );
 
   final LocalApiBootstrap _bootstrap;
+  final DocumentAi? _documentAi;
   EndlessLocalApi? _client;
   Object? _editorOwner;
   Future<void> Function()? _flushEditor;
@@ -58,11 +71,20 @@ final class AppController extends ChangeNotifier {
   List<JsonMap> workspaces = <JsonMap>[];
   List<JsonMap> documents = <JsonMap>[];
   List<JsonMap> attachments = <JsonMap>[];
+  List<AiConversationMessage> aiMessages = <AiConversationMessage>[];
   String? selectedWorkspaceId;
   String? selectedDocumentId;
+  DocumentAiAvailability aiAvailability = DocumentAiAvailability.unknown;
+  String? aiError;
+  bool aiPanelOpen = false;
+  bool aiChecking = false;
+  bool aiRunning = false;
+  bool aiDisclosureAccepted = false;
+  _AiUndoSnapshot? _aiUndo;
   int _searchRequest = 0;
 
   bool get hasSearch => searchQuery.isNotEmpty;
+  bool get canUndoAiEdit => _aiUndo != null;
 
   JsonMap? get selectedWorkspace {
     final String? id = selectedWorkspaceId;
@@ -285,6 +307,7 @@ final class AppController extends ChangeNotifier {
       return;
     }
     await flushPendingChanges();
+    await _resetAiSession();
     selectedWorkspaceId = workspaceId;
     selectedDocumentId = null;
     showRecycleBin = false;
@@ -298,6 +321,7 @@ final class AppController extends ChangeNotifier {
       return;
     }
     await flushPendingChanges();
+    await _resetAiSession();
     selectedDocumentId = documentId;
     showRecycleBin = false;
     await _loadAttachments();
@@ -309,6 +333,7 @@ final class AppController extends ChangeNotifier {
       return;
     }
     await flushPendingChanges();
+    await _resetAiSession();
     showRecycleBin = value;
     _clearSearchState();
     selectedDocumentId = null;
@@ -397,7 +422,11 @@ final class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> createDocument(String title, {String? parentId}) async {
+  Future<void> createDocument(
+    String title, {
+    String? parentId,
+    String documentType = 'plain',
+  }) async {
     await flushPendingChanges();
     final String? workspaceId = selectedWorkspaceId;
     if (workspaceId == null) {
@@ -413,6 +442,7 @@ final class AppController extends ChangeNotifier {
         workspaceId: workspaceId,
         title: title,
         parentId: parentId,
+        documentType: documentType,
       ),
     );
     showRecycleBin = false;
@@ -429,6 +459,8 @@ final class AppController extends ChangeNotifier {
     required String text,
     required int expectedRevision,
     String? blockId,
+    String? documentType,
+    bool preserveAiUndo = false,
   }) async {
     final String commandId = _commandId();
     final JsonMap saved = await _withReconnect(
@@ -443,12 +475,222 @@ final class AppController extends ChangeNotifier {
             'payload': <String, Object?>{'text': text},
           },
         ],
+        documentType: documentType,
         expectedRevision: expectedRevision,
       ),
     );
     _replaceDocument(saved);
+    if (!preserveAiUndo) {
+      _aiUndo = null;
+    }
     notifyListeners();
     return saved;
+  }
+
+  Future<void> setSelectedDocumentType(String documentType) async {
+    if (!const <String>{
+      'plain',
+      'adr',
+      'business_need',
+      'rfc',
+    }.contains(documentType)) {
+      throw ArgumentError.value(documentType, 'documentType');
+    }
+    await flushPendingChanges();
+    final JsonMap? document = selectedDocument;
+    if (document == null || !isSelectedWorkspaceWritable) {
+      return;
+    }
+    try {
+      await _documentAi?.reset();
+    } on CodexException {
+      // AI is optional: a failed child process must not block local metadata.
+    }
+    aiMessages = <AiConversationMessage>[];
+    await saveDocument(
+      documentId: requireString(document, 'document_id'),
+      title: requireString(document, 'title'),
+      text: _documentText(document),
+      expectedRevision: requireInt(document, 'revision'),
+      blockId: _documentBlockId(document),
+      documentType: documentType,
+    );
+  }
+
+  Future<void> setAiPanelOpen(bool open) async {
+    aiPanelOpen = open;
+    notifyListeners();
+    if (open && aiAvailability == DocumentAiAvailability.unknown) {
+      await checkAiAvailability();
+    }
+  }
+
+  void acceptAiDisclosure() {
+    aiDisclosureAccepted = true;
+    notifyListeners();
+  }
+
+  Future<void> checkAiAvailability() async {
+    final DocumentAi? ai = _documentAi;
+    if (ai == null) {
+      aiAvailability = DocumentAiAvailability.missing;
+      notifyListeners();
+      return;
+    }
+    aiChecking = true;
+    aiError = null;
+    notifyListeners();
+    try {
+      aiAvailability = await ai.checkAvailability();
+    } on Object {
+      aiAvailability = DocumentAiAvailability.unavailable;
+    } finally {
+      aiChecking = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> runDocumentAi(String instruction) async {
+    final DocumentAi? ai = _documentAi;
+    if (ai == null) {
+      aiAvailability = DocumentAiAvailability.missing;
+      notifyListeners();
+      return;
+    }
+    if (!aiDisclosureAccepted) {
+      throw StateError('AI disclosure must be accepted first.');
+    }
+    if (!isSelectedWorkspaceWritable) {
+      throw StateError('Archived workspace is read-only.');
+    }
+    await flushPendingChanges();
+    final JsonMap? source = selectedDocument;
+    if (source == null) {
+      return;
+    }
+    final String documentType = source['document_type'] as String? ?? 'plain';
+    if (documentType == 'plain') {
+      throw StateError('Select a document type first.');
+    }
+    final String documentId = requireString(source, 'document_id');
+    final int sourceRevision = requireInt(source, 'revision');
+    final String sourceTitle = requireString(source, 'title');
+    final String sourceText = _documentText(source);
+    final String? sourceBlockId = _documentBlockId(source);
+    final String normalizedInstruction = instruction.trim();
+    aiMessages = <AiConversationMessage>[
+      ...aiMessages,
+      AiConversationMessage(
+        role: AiMessageRole.user,
+        text: normalizedInstruction,
+      ),
+    ];
+    aiRunning = true;
+    aiError = null;
+    _aiUndo = null;
+    notifyListeners();
+    try {
+      final DocumentAiResult result = await ai.run(
+        snapshot: DocumentAiSnapshot(
+          documentType: documentType,
+          title: sourceTitle,
+          content: sourceText,
+        ),
+        instruction: normalizedInstruction,
+      );
+      final String assistantText = <String>[
+        if (result.message.trim().isNotEmpty) result.message.trim(),
+        for (final String question in result.questions) '• $question',
+      ].join('\n');
+      if (result.action == DocumentAiAction.replaceDocument) {
+        await flushPendingChanges();
+        final JsonMap? current = selectedDocument;
+        if (current == null ||
+            requireString(current, 'document_id') != documentId ||
+            requireInt(current, 'revision') != sourceRevision ||
+            (current['document_type'] as String? ?? 'plain') != documentType) {
+          throw const CodexException(
+            'AiResultStale',
+            'Документ изменился. Повторите запрос для актуальной версии.',
+          );
+        }
+        final JsonMap saved = await saveDocument(
+          documentId: documentId,
+          title: result.title!,
+          text: result.content!,
+          expectedRevision: sourceRevision,
+          blockId: sourceBlockId,
+          documentType: documentType,
+          preserveAiUndo: true,
+        );
+        _aiUndo = _AiUndoSnapshot(
+          documentId: documentId,
+          documentType: documentType,
+          title: sourceTitle,
+          text: sourceText,
+          blockId: sourceBlockId,
+          appliedRevision: requireInt(saved, 'revision'),
+        );
+      }
+      aiMessages = <AiConversationMessage>[
+        ...aiMessages,
+        AiConversationMessage(
+          role: AiMessageRole.assistant,
+          text: assistantText.isEmpty
+              ? 'Codex завершил обработку документа.'
+              : assistantText,
+        ),
+      ];
+      aiAvailability = DocumentAiAvailability.ready;
+    } on CodexException catch (error) {
+      aiError = error.message;
+      if (error.code == 'CodexAuthRequired') {
+        aiAvailability = DocumentAiAvailability.authRequired;
+      }
+    } on LocalApiException catch (error) {
+      aiError = error.code == 'RevisionConflict'
+          ? 'Документ изменился. Повторите запрос для актуальной версии.'
+          : error.message;
+    } finally {
+      aiRunning = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> cancelDocumentAi() async {
+    try {
+      await _documentAi?.cancel();
+    } on CodexException catch (error) {
+      aiError = error.message;
+    }
+  }
+
+  Future<void> undoAiEdit() async {
+    final _AiUndoSnapshot? undo = _aiUndo;
+    if (undo == null) {
+      return;
+    }
+    await flushPendingChanges();
+    final JsonMap? current = selectedDocument;
+    if (current == null ||
+        requireString(current, 'document_id') != undo.documentId ||
+        requireInt(current, 'revision') != undo.appliedRevision) {
+      _aiUndo = null;
+      aiError = 'Документ уже изменился, поэтому AI-правку нельзя отменить.';
+      notifyListeners();
+      return;
+    }
+    await saveDocument(
+      documentId: undo.documentId,
+      title: undo.title,
+      text: undo.text,
+      expectedRevision: undo.appliedRevision,
+      blockId: undo.blockId,
+      documentType: undo.documentType,
+      preserveAiUndo: true,
+    );
+    _aiUndo = null;
+    notifyListeners();
   }
 
   Future<void> addAttachmentFromPath(
@@ -701,6 +943,32 @@ final class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> _resetAiSession() async {
+    try {
+      await _documentAi?.reset();
+    } on CodexException {
+      // Selection must remain available even if Codex has stopped.
+    }
+    aiMessages = <AiConversationMessage>[];
+    aiError = null;
+    aiRunning = false;
+    _aiUndo = null;
+  }
+
+  static String _documentText(JsonMap document) {
+    final List<JsonMap> blocks = requireMapList(document, 'blocks');
+    if (blocks.isEmpty) {
+      return '';
+    }
+    final Object? text = requireMap(blocks.first, 'payload')['text'];
+    return text is String ? text : '';
+  }
+
+  static String? _documentBlockId(JsonMap document) {
+    final List<JsonMap> blocks = requireMapList(document, 'blocks');
+    return blocks.isEmpty ? null : blocks.first['block_id'] as String?;
+  }
+
   Future<void> _refreshSearch() async {
     if (searchQuery.isNotEmpty) {
       await search(searchQuery);
@@ -773,6 +1041,28 @@ final class AppController extends ChangeNotifier {
     if (client != null) {
       unawaited(client.close());
     }
+    final DocumentAi? ai = _documentAi;
+    if (ai != null) {
+      unawaited(ai.close());
+    }
     super.dispose();
   }
+}
+
+final class _AiUndoSnapshot {
+  const _AiUndoSnapshot({
+    required this.documentId,
+    required this.documentType,
+    required this.title,
+    required this.text,
+    required this.blockId,
+    required this.appliedRevision,
+  });
+
+  final String documentId;
+  final String documentType;
+  final String title;
+  final String text;
+  final String? blockId;
+  final int appliedRevision;
 }

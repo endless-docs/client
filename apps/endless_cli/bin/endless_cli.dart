@@ -279,7 +279,7 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
       rethrow;
     }
     return <String, Object?>{
-      'format_version': 1,
+      'format_version': 2,
       'size': backup.size,
       'output_path': target.path,
     };

@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'records.dart';
+part of 'schema_v3.dart';
 
 // **************************************************************************
 // IsarCollectionGenerator
@@ -1301,31 +1301,26 @@ const DocumentRecordSchema = CollectionSchema(
       name: r'documentId',
       type: IsarType.string,
     ),
-    r'documentType': PropertySchema(
-      id: 2,
-      name: r'documentType',
-      type: IsarType.string,
-    ),
     r'isDeleted': PropertySchema(
-      id: 3,
+      id: 2,
       name: r'isDeleted',
       type: IsarType.bool,
     ),
     r'parentId': PropertySchema(
-      id: 4,
+      id: 3,
       name: r'parentId',
       type: IsarType.string,
     ),
-    r'position': PropertySchema(id: 5, name: r'position', type: IsarType.long),
-    r'revision': PropertySchema(id: 6, name: r'revision', type: IsarType.long),
-    r'title': PropertySchema(id: 7, name: r'title', type: IsarType.string),
+    r'position': PropertySchema(id: 4, name: r'position', type: IsarType.long),
+    r'revision': PropertySchema(id: 5, name: r'revision', type: IsarType.long),
+    r'title': PropertySchema(id: 6, name: r'title', type: IsarType.string),
     r'updatedAt': PropertySchema(
-      id: 8,
+      id: 7,
       name: r'updatedAt',
       type: IsarType.dateTime,
     ),
     r'workspaceId': PropertySchema(
-      id: 9,
+      id: 8,
       name: r'workspaceId',
       type: IsarType.string,
     ),
@@ -1380,7 +1375,6 @@ int _documentRecordEstimateSize(
 ) {
   var bytesCount = offsets.last;
   bytesCount += 3 + object.documentId.length * 3;
-  bytesCount += 3 + object.documentType.length * 3;
   {
     final value = object.parentId;
     if (value != null) {
@@ -1400,14 +1394,13 @@ void _documentRecordSerialize(
 ) {
   writer.writeDateTime(offsets[0], object.createdAt);
   writer.writeString(offsets[1], object.documentId);
-  writer.writeString(offsets[2], object.documentType);
-  writer.writeBool(offsets[3], object.isDeleted);
-  writer.writeString(offsets[4], object.parentId);
-  writer.writeLong(offsets[5], object.position);
-  writer.writeLong(offsets[6], object.revision);
-  writer.writeString(offsets[7], object.title);
-  writer.writeDateTime(offsets[8], object.updatedAt);
-  writer.writeString(offsets[9], object.workspaceId);
+  writer.writeBool(offsets[2], object.isDeleted);
+  writer.writeString(offsets[3], object.parentId);
+  writer.writeLong(offsets[4], object.position);
+  writer.writeLong(offsets[5], object.revision);
+  writer.writeString(offsets[6], object.title);
+  writer.writeDateTime(offsets[7], object.updatedAt);
+  writer.writeString(offsets[8], object.workspaceId);
 }
 
 DocumentRecord _documentRecordDeserialize(
@@ -1419,15 +1412,14 @@ DocumentRecord _documentRecordDeserialize(
   final object = DocumentRecord();
   object.createdAt = reader.readDateTime(offsets[0]);
   object.documentId = reader.readString(offsets[1]);
-  object.documentType = reader.readString(offsets[2]);
   object.id = id;
-  object.isDeleted = reader.readBool(offsets[3]);
-  object.parentId = reader.readStringOrNull(offsets[4]);
-  object.position = reader.readLong(offsets[5]);
-  object.revision = reader.readLong(offsets[6]);
-  object.title = reader.readString(offsets[7]);
-  object.updatedAt = reader.readDateTime(offsets[8]);
-  object.workspaceId = reader.readString(offsets[9]);
+  object.isDeleted = reader.readBool(offsets[2]);
+  object.parentId = reader.readStringOrNull(offsets[3]);
+  object.position = reader.readLong(offsets[4]);
+  object.revision = reader.readLong(offsets[5]);
+  object.title = reader.readString(offsets[6]);
+  object.updatedAt = reader.readDateTime(offsets[7]);
+  object.workspaceId = reader.readString(offsets[8]);
   return object;
 }
 
@@ -1443,20 +1435,18 @@ P _documentRecordDeserializeProp<P>(
     case 1:
       return (reader.readString(offset)) as P;
     case 2:
-      return (reader.readString(offset)) as P;
-    case 3:
       return (reader.readBool(offset)) as P;
-    case 4:
+    case 3:
       return (reader.readStringOrNull(offset)) as P;
+    case 4:
+      return (reader.readLong(offset)) as P;
     case 5:
       return (reader.readLong(offset)) as P;
     case 6:
-      return (reader.readLong(offset)) as P;
-    case 7:
       return (reader.readString(offset)) as P;
-    case 8:
+    case 7:
       return (reader.readDateTime(offset)) as P;
-    case 9:
+    case 8:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -1923,147 +1913,6 @@ extension DocumentRecordQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         FilterCondition.greaterThan(property: r'documentId', value: ''),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeEqualTo(String value, {bool caseSensitive = true}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.equalTo(
-          property: r'documentType',
-          value: value,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeGreaterThan(
-    String value, {
-    bool include = false,
-    bool caseSensitive = true,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.greaterThan(
-          include: include,
-          property: r'documentType',
-          value: value,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeLessThan(
-    String value, {
-    bool include = false,
-    bool caseSensitive = true,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.lessThan(
-          include: include,
-          property: r'documentType',
-          value: value,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeBetween(
-    String lower,
-    String upper, {
-    bool includeLower = true,
-    bool includeUpper = true,
-    bool caseSensitive = true,
-  }) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.between(
-          property: r'documentType',
-          lower: lower,
-          includeLower: includeLower,
-          upper: upper,
-          includeUpper: includeUpper,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeStartsWith(String value, {bool caseSensitive = true}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.startsWith(
-          property: r'documentType',
-          value: value,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeEndsWith(String value, {bool caseSensitive = true}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.endsWith(
-          property: r'documentType',
-          value: value,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeContains(String value, {bool caseSensitive = true}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.contains(
-          property: r'documentType',
-          value: value,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeMatches(String pattern, {bool caseSensitive = true}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.matches(
-          property: r'documentType',
-          wildcard: pattern,
-          caseSensitive: caseSensitive,
-        ),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeIsEmpty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.equalTo(property: r'documentType', value: ''),
-      );
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterFilterCondition>
-  documentTypeIsNotEmpty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        FilterCondition.greaterThan(property: r'documentType', value: ''),
       );
     });
   }
@@ -2774,20 +2623,6 @@ extension DocumentRecordQuerySortBy
     });
   }
 
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterSortBy>
-  sortByDocumentType() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'documentType', Sort.asc);
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterSortBy>
-  sortByDocumentTypeDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'documentType', Sort.desc);
-    });
-  }
-
   QueryBuilder<DocumentRecord, DocumentRecord, QAfterSortBy> sortByIsDeleted() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'isDeleted', Sort.asc);
@@ -2906,20 +2741,6 @@ extension DocumentRecordQuerySortThenBy
   thenByDocumentIdDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'documentId', Sort.desc);
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterSortBy>
-  thenByDocumentType() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'documentType', Sort.asc);
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QAfterSortBy>
-  thenByDocumentTypeDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'documentType', Sort.desc);
     });
   }
 
@@ -3045,13 +2866,6 @@ extension DocumentRecordQueryWhereDistinct
   }
 
   QueryBuilder<DocumentRecord, DocumentRecord, QDistinct>
-  distinctByDocumentType({bool caseSensitive = true}) {
-    return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'documentType', caseSensitive: caseSensitive);
-    });
-  }
-
-  QueryBuilder<DocumentRecord, DocumentRecord, QDistinct>
   distinctByIsDeleted() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'isDeleted');
@@ -3118,13 +2932,6 @@ extension DocumentRecordQueryProperty
   QueryBuilder<DocumentRecord, String, QQueryOperations> documentIdProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'documentId');
-    });
-  }
-
-  QueryBuilder<DocumentRecord, String, QQueryOperations>
-  documentTypeProperty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'documentType');
     });
   }
 

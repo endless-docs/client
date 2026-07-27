@@ -25,6 +25,7 @@ apps/
 packages/
   client_domain/          Entities, values, invariants, domain operations
   client_application/     Commands, queries, ports, transaction orchestration
+  codex_app_server/        Optional Codex app-server protocol and document AI
   local_api/              Semantic API facade and transport-neutral interfaces
   local_api_client/       Typed client, reconnect and event subscriptions
   persistence_isar/       Isar records, indexes, mappers, migrations
@@ -68,6 +69,7 @@ Application services --> Domain
 | `local_api_client` | Contract artifact, transport client | Domain internals, Isar |
 | `persistence_isar` | Isar, domain/application ports | UI, MCP |
 | Flutter UI | `local_api_client`, presentation packages | Isar, application internals |
+| `codex_app_server` | Dart standard library, Codex child process | Isar, Local API internals |
 | MCP server | `local_api_client`, MCP SDK | Isar, domain internals |
 | CLI | `local_api_client`, CLI framework | Isar, domain internals |
 | `locald` root | Application, adapters, Local API host | Flutter UI |

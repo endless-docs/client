@@ -147,6 +147,7 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     required String workspaceId,
     required String title,
     String? parentId,
+    String documentType = 'plain',
   }) => _command(
     commandId: commandId,
     method: 'CreateDocument',
@@ -154,6 +155,7 @@ final class HttpLocalApiClient implements EndlessLocalApi {
       'workspace_id': workspaceId,
       'title': title,
       'parent_id': parentId,
+      'document_type': documentType,
     },
   );
 
@@ -163,6 +165,7 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     required String documentId,
     required String title,
     required List<JsonMap> blocks,
+    String? documentType,
     int? expectedRevision,
   }) => _command(
     commandId: commandId,
@@ -171,6 +174,7 @@ final class HttpLocalApiClient implements EndlessLocalApi {
       'document_id': documentId,
       'title': title,
       'blocks': blocks,
+      'document_type': ?documentType,
       'expected_revision': expectedRevision,
     },
   );

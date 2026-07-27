@@ -2,6 +2,25 @@ enum WorkspaceLifecycle { active, archived, deleted }
 
 enum BlockType { paragraph, heading, list, code, quote, unsupported }
 
+enum DocumentType { plain, adr, businessNeed, rfc }
+
+extension DocumentTypeWireName on DocumentType {
+  String get wireName => switch (this) {
+    DocumentType.plain => 'plain',
+    DocumentType.adr => 'adr',
+    DocumentType.businessNeed => 'business_need',
+    DocumentType.rfc => 'rfc',
+  };
+}
+
+DocumentType documentTypeFromWireName(String value) => switch (value) {
+  'plain' => DocumentType.plain,
+  'adr' => DocumentType.adr,
+  'business_need' => DocumentType.businessNeed,
+  'rfc' => DocumentType.rfc,
+  _ => throw ArgumentError.value(value, 'value', 'Unknown document type'),
+};
+
 final class Workspace {
   const Workspace({
     required this.id,
@@ -57,6 +76,7 @@ final class Document {
     required this.parentId,
     required this.position,
     required this.blocks,
+    this.documentType = DocumentType.plain,
     required this.revision,
     required this.isDeleted,
     required this.createdAt,
@@ -69,6 +89,7 @@ final class Document {
   final String? parentId;
   final int position;
   final List<Block> blocks;
+  final DocumentType documentType;
   final int revision;
   final bool isDeleted;
   final DateTime createdAt;
@@ -77,6 +98,7 @@ final class Document {
   Document updateContent({
     required String title,
     required List<Block> blocks,
+    DocumentType? documentType,
     required DateTime now,
   }) => Document(
     id: id,
@@ -85,6 +107,7 @@ final class Document {
     parentId: parentId,
     position: position,
     blocks: List<Block>.unmodifiable(blocks),
+    documentType: documentType ?? this.documentType,
     revision: revision + 1,
     isDeleted: isDeleted,
     createdAt: createdAt,
@@ -102,6 +125,7 @@ final class Document {
     parentId: parentId,
     position: position,
     blocks: blocks,
+    documentType: documentType,
     revision: revision + 1,
     isDeleted: isDeleted,
     createdAt: createdAt,
@@ -115,6 +139,7 @@ final class Document {
     parentId: parentId,
     position: position,
     blocks: blocks,
+    documentType: documentType,
     revision: revision + 1,
     isDeleted: value,
     createdAt: createdAt,
@@ -128,6 +153,7 @@ final class Document {
     'parent_id': parentId,
     'position': position,
     'blocks': blocks.map((Block block) => block.toJson()).toList(),
+    'document_type': documentType.wireName,
     'revision': revision,
     'is_deleted': isDeleted,
     'created_at': createdAt.toUtc().toIso8601String(),

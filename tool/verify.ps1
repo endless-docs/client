@@ -27,6 +27,7 @@ try {
     } 'Architecture check'
 
     foreach ($package in @(
+        'packages\codex_app_server',
         'packages\client_domain',
         'packages\client_application',
         'packages\local_api',

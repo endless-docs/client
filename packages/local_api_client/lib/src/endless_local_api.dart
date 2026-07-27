@@ -74,6 +74,7 @@ abstract interface class EndlessLocalApi {
     required String workspaceId,
     required String title,
     String? parentId,
+    String documentType = 'plain',
   });
 
   Future<JsonMap> saveDocument({
@@ -81,6 +82,7 @@ abstract interface class EndlessLocalApi {
     required String documentId,
     required String title,
     required List<JsonMap> blocks,
+    String? documentType,
     int? expectedRevision,
   });
 

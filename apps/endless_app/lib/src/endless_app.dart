@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show AppExitResponse;
 
+import 'package:codex_app_server/codex_app_server.dart';
 import 'package:flutter/material.dart';
 import 'package:local_api/local_api.dart';
 
@@ -174,21 +175,53 @@ final class _ReadyView extends StatelessWidget {
       children: <Widget>[
         SizedBox(width: 300, child: _NavigationPane(controller: controller)),
         const VerticalDivider(width: 1),
-        Expanded(
-          child: controller.showRecycleBin
-              ? _RecycleBinView(controller: controller)
-              : controller.selectedDocument == null
-              ? _EmptyDocumentView(controller: controller)
-              : DocumentEditor(
-                  key: ValueKey<String>(controller.selectedDocumentId!),
-                  controller: controller,
-                  document: controller.selectedDocument!,
-                  readOnly: !controller.isSelectedWorkspaceWritable,
-                ),
-        ),
+        Expanded(child: _ContentPane(controller: controller)),
       ],
     ),
   );
+}
+
+final class _ContentPane extends StatelessWidget {
+  const _ContentPane({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (controller.showRecycleBin) {
+      return _RecycleBinView(controller: controller);
+    }
+    if (controller.selectedDocument == null) {
+      return _EmptyDocumentView(controller: controller);
+    }
+    final bool readOnly = !controller.isSelectedWorkspaceWritable;
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        if (controller.aiPanelOpen && constraints.maxWidth < 760) {
+          return _AiPanel(controller: controller, readOnly: readOnly);
+        }
+        return Row(
+          children: <Widget>[
+            Expanded(
+              child: DocumentEditor(
+                key: ValueKey<String>(controller.selectedDocumentId!),
+                controller: controller,
+                document: controller.selectedDocument!,
+                readOnly: readOnly,
+              ),
+            ),
+            if (controller.aiPanelOpen) ...<Widget>[
+              const VerticalDivider(width: 1),
+              SizedBox(
+                width: 380,
+                child: _AiPanel(controller: controller, readOnly: readOnly),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 }
 
 final class _NavigationPane extends StatelessWidget {
@@ -743,7 +776,8 @@ final class _DocumentEditorState extends State<DocumentEditor> {
   void didUpdateWidget(DocumentEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
     final int incomingRevision = requireInt(widget.document, 'revision');
-    if (_state == _SaveState.conflict && incomingRevision != _revision) {
+    if (incomingRevision != _revision &&
+        (!_dirty || _state == _SaveState.conflict)) {
       final List<JsonMap> blocks = requireMapList(widget.document, 'blocks');
       _revision = incomingRevision;
       _blockId = blocks.isEmpty ? null : blocks.first['block_id'] as String?;
@@ -897,6 +931,17 @@ final class _DocumentEditorState extends State<DocumentEditor> {
             else
               _SaveIndicator(state: _state, onSave: _save),
             const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'AI-помощник',
+              onPressed: () => widget.controller.setAiPanelOpen(
+                !widget.controller.aiPanelOpen,
+              ),
+              icon: Icon(
+                widget.controller.aiPanelOpen
+                    ? Icons.auto_awesome
+                    : Icons.auto_awesome_outlined,
+              ),
+            ),
             if (!widget.readOnly)
               IconButton(
                 tooltip: 'Удалить документ',
@@ -946,6 +991,281 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       ],
     ),
   );
+}
+
+final class _AiPanel extends StatefulWidget {
+  const _AiPanel({required this.controller, required this.readOnly});
+
+  final AppController controller;
+  final bool readOnly;
+
+  @override
+  State<_AiPanel> createState() => _AiPanelState();
+}
+
+final class _AiPanelState extends State<_AiPanel> {
+  final TextEditingController _instruction = TextEditingController();
+
+  @override
+  void dispose() {
+    _instruction.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    if (!widget.controller.aiDisclosureAccepted) {
+      final bool? accepted = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: const Text('Отправить документ в Codex?'),
+          content: const Text(
+            'Заголовок, текст текущего документа и ваша команда будут '
+            'отправлены в OpenAI через локально установленный Codex. '
+            'Другие документы и вложения не отправляются.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Продолжить'),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true || !mounted) {
+        return;
+      }
+      widget.controller.acceptAiDisclosure();
+    }
+    final String instruction = _instruction.text;
+    await _runUiActionAsync(
+      context,
+      () => widget.controller.runDocumentAi(instruction),
+    );
+    if (mounted && widget.controller.aiError == null) {
+      _instruction.clear();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AppController controller = widget.controller;
+    final JsonMap document = controller.selectedDocument!;
+    final String documentType = document['document_type'] as String? ?? 'plain';
+    final bool ready =
+        controller.aiAvailability == DocumentAiAvailability.ready;
+    final bool canSend =
+        ready &&
+        !widget.readOnly &&
+        !controller.aiRunning &&
+        documentType != 'plain';
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                const Icon(Icons.auto_awesome, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'AI-помощник',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Закрыть AI-панель',
+                  onPressed: () => controller.setAiPanelOpen(false),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: documentType,
+              decoration: const InputDecoration(
+                labelText: 'Тип документа',
+                border: OutlineInputBorder(),
+              ),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem<String>(
+                  value: 'plain',
+                  child: Text('Не выбран'),
+                ),
+                DropdownMenuItem<String>(value: 'adr', child: Text('ADR')),
+                DropdownMenuItem<String>(
+                  value: 'business_need',
+                  child: Text('Business Need'),
+                ),
+                DropdownMenuItem<String>(value: 'rfc', child: Text('RFC')),
+              ],
+              onChanged: widget.readOnly || controller.aiRunning
+                  ? null
+                  : (String? value) {
+                      if (value != null && value != documentType) {
+                        _runUiAction(
+                          context,
+                          () => controller.setSelectedDocumentType(value),
+                        );
+                      }
+                    },
+            ),
+            const SizedBox(height: 12),
+            _AiAvailabilityView(controller: controller),
+            if (controller.aiError != null) ...<Widget>[
+              const SizedBox(height: 8),
+              MaterialBanner(
+                content: Text(controller.aiError!),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: controller.checkAiAvailability,
+                    child: const Text('Повторить'),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 8),
+            Expanded(
+              child: controller.aiMessages.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Опишите идею или попросите Codex улучшить текущий '
+                        'документ.',
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: controller.aiMessages.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (BuildContext context, int index) {
+                        final AiConversationMessage message =
+                            controller.aiMessages[index];
+                        final bool user = message.role == AiMessageRole.user;
+                        return Align(
+                          alignment: user
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: user
+                                  ? Theme.of(
+                                      context,
+                                    ).colorScheme.primaryContainer
+                                  : Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Text(message.text),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            if (controller.aiRunning) ...<Widget>[
+              const LinearProgressIndicator(),
+              const SizedBox(height: 8),
+            ],
+            TextField(
+              controller: _instruction,
+              minLines: 2,
+              maxLines: 5,
+              enabled: canSend,
+              decoration: InputDecoration(
+                hintText: documentType == 'plain'
+                    ? 'Сначала выберите тип документа'
+                    : 'Что сделать с документом?',
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: canSend ? (_) => unawaited(_send()) : null,
+            ),
+            const SizedBox(height: 8),
+            if (controller.canUndoAiEdit)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: controller.aiRunning
+                      ? null
+                      : () => _runUiAction(context, controller.undoAiEdit),
+                  icon: const Icon(Icons.undo),
+                  label: const Text('Отменить AI-правку'),
+                ),
+              ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: controller.aiRunning
+                  ? OutlinedButton(
+                      onPressed: controller.cancelDocumentAi,
+                      child: const Text('Остановить'),
+                    )
+                  : FilledButton.icon(
+                      onPressed: canSend ? _send : null,
+                      icon: const Icon(Icons.send),
+                      label: const Text('Отправить'),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _AiAvailabilityView extends StatelessWidget {
+  const _AiAvailabilityView({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (controller.aiChecking) {
+      return const Row(
+        children: <Widget>[
+          SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 8),
+          Text('Проверяем локальный Codex…'),
+        ],
+      );
+    }
+    final String text = switch (controller.aiAvailability) {
+      DocumentAiAvailability.ready => 'Codex готов',
+      DocumentAiAvailability.missing =>
+        'Codex не найден. Установите Codex и выполните codex login.',
+      DocumentAiAvailability.authRequired =>
+        'Требуется авторизация. Выполните codex login.',
+      DocumentAiAvailability.unavailable => 'Codex временно недоступен.',
+      DocumentAiAvailability.unknown => 'Codex ещё не проверен.',
+    };
+    return Row(
+      children: <Widget>[
+        Icon(
+          controller.aiAvailability == DocumentAiAvailability.ready
+              ? Icons.check_circle_outline
+              : Icons.info_outline,
+          size: 18,
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text)),
+        if (controller.aiAvailability != DocumentAiAvailability.ready)
+          IconButton(
+            tooltip: 'Проверить Codex',
+            onPressed: controller.checkAiAvailability,
+            icon: const Icon(Icons.refresh),
+          ),
+      ],
+    );
+  }
 }
 
 final class _AttachmentsPanel extends StatelessWidget {
@@ -1152,17 +1472,86 @@ Future<void> _createDocument(
   AppController controller, {
   String? parentId,
 }) async {
-  final String? title = await _askText(
-    context,
-    title: parentId == null ? 'Новый документ' : 'Вложенный документ',
-    hint: 'Название документа',
+  String title = '';
+  String documentType = 'plain';
+  final _NewDocumentDraft? draft = await showDialog<_NewDocumentDraft>(
+    context: context,
+    builder: (BuildContext context) => StatefulBuilder(
+      builder: (BuildContext context, StateSetter setState) => AlertDialog(
+        title: Text(parentId == null ? 'Новый документ' : 'Вложенный документ'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              TextField(
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Название документа',
+                ),
+                onChanged: (String value) => title = value,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: documentType,
+                decoration: const InputDecoration(
+                  labelText: 'Тип документа',
+                  border: OutlineInputBorder(),
+                ),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem<String>(
+                    value: 'plain',
+                    child: Text('Обычный документ'),
+                  ),
+                  DropdownMenuItem<String>(value: 'adr', child: Text('ADR')),
+                  DropdownMenuItem<String>(
+                    value: 'business_need',
+                    child: Text('Business Need'),
+                  ),
+                  DropdownMenuItem<String>(value: 'rfc', child: Text('RFC')),
+                ],
+                onChanged: (String? value) {
+                  if (value != null) {
+                    setState(() => documentType = value);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              context,
+              _NewDocumentDraft(title: title, documentType: documentType),
+            ),
+            child: const Text('Создать'),
+          ),
+        ],
+      ),
+    ),
   );
-  if (title != null && title.trim().isNotEmpty && context.mounted) {
+  if (draft != null && draft.title.trim().isNotEmpty && context.mounted) {
     _runUiAction(
       context,
-      () => controller.createDocument(title, parentId: parentId),
+      () => controller.createDocument(
+        draft.title,
+        parentId: parentId,
+        documentType: draft.documentType,
+      ),
     );
   }
+}
+
+final class _NewDocumentDraft {
+  const _NewDocumentDraft({required this.title, required this.documentType});
+
+  final String title;
+  final String documentType;
 }
 
 Future<void> _moveDocument(

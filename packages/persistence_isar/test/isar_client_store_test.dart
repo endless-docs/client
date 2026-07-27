@@ -9,6 +9,7 @@ import 'package:test/test.dart';
 
 import 'fixtures/schema_v1.dart' as v1;
 import 'fixtures/schema_v2.dart' as v2;
+import 'fixtures/schema_v3.dart' as v3;
 
 void main() {
   test(
@@ -106,6 +107,12 @@ void main() {
   test(
     'schema v2 fixture opens with empty attachment collections',
     _verifySchemaV2Migration,
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'schema v3 fixture assigns the plain document type',
+    _verifySchemaV3Migration,
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
@@ -411,6 +418,105 @@ Future<void> _verifySchemaV2Migration() async {
     expect((await service.getSearchStatus()).isCurrent, isTrue);
     expect(await service.listAttachments('v2-document'), isEmpty);
     expect(await service.pendingAttachmentCommits(), isEmpty);
+  } finally {
+    await currentStore?.close();
+    if (await temporary.exists()) {
+      await temporary.delete(recursive: true);
+    }
+  }
+}
+
+Future<void> _verifySchemaV3Migration() async {
+  final Directory temporary = Directory(
+    '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+    '${Platform.pathSeparator}test_profiles${Platform.pathSeparator}'
+    'migration-v3-${DateTime.now().microsecondsSinceEpoch}',
+  );
+  final Directory bootstrap = Directory(
+    '${temporary.path}${Platform.pathSeparator}bootstrap',
+  );
+  final Directory profile = Directory(
+    '${temporary.path}${Platform.pathSeparator}profile',
+  );
+  await temporary.create(recursive: true);
+  await profile.create(recursive: true);
+  IsarClientStore? currentStore;
+  try {
+    final String nativeLibraryPath =
+        '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+        '${Platform.pathSeparator}isar${Platform.pathSeparator}isar.dll';
+    final IsarClientStore bootstrapStore = await IsarClientStore.open(
+      directory: bootstrap.path,
+      nativeLibraryPath: nativeLibraryPath,
+      allowDevelopmentDownload: true,
+      instanceName: 'migration-v3-bootstrap',
+    );
+    await bootstrapStore.close();
+
+    final Isar legacy = await Isar.open(
+      <CollectionSchema<Object>>[
+        v3.WorkspaceRecordSchema,
+        v3.DocumentRecordSchema,
+        v3.BlockRecordSchema,
+        v3.CommandOutcomeRecordSchema,
+        v3.OperationRecordSchema,
+        v3.SearchProjectionRecordSchema,
+        v3.AttachmentRecordSchema,
+        v3.AttachmentCommitRecordSchema,
+        v3.RuntimeStateRecordSchema,
+      ],
+      directory: profile.path,
+      name: 'migration-v3-fixture',
+      relaxedDurability: false,
+      inspector: false,
+    );
+    final DateTime createdAt = DateTime.utc(2026, 1, 1);
+    await legacy.writeTxn(() async {
+      await legacy.collection<v3.WorkspaceRecord>().put(
+        v3.WorkspaceRecord()
+          ..workspaceId = 'v3-workspace'
+          ..name = 'Before AI'
+          ..lifecycle = 'active'
+          ..revision = 1
+          ..createdAt = createdAt
+          ..updatedAt = createdAt,
+      );
+      await legacy.collection<v3.DocumentRecord>().put(
+        v3.DocumentRecord()
+          ..documentId = 'v3-document'
+          ..workspaceId = 'v3-workspace'
+          ..parentId = null
+          ..title = 'Existing document'
+          ..position = 0
+          ..revision = 1
+          ..isDeleted = false
+          ..createdAt = createdAt
+          ..updatedAt = createdAt,
+      );
+      await legacy.collection<v3.RuntimeStateRecord>().put(
+        v3.RuntimeStateRecord()
+          ..eventSequence = 1
+          ..searchIndexedSequence = 0,
+      );
+    });
+    await legacy.close();
+
+    currentStore = await IsarClientStore.open(
+      directory: profile.path,
+      nativeLibraryPath: nativeLibraryPath,
+      allowDevelopmentDownload: true,
+      instanceName: 'migration-v3-fixture',
+    );
+    final ClientApplicationService service = ClientApplicationService(
+      store: currentStore,
+      clock: const _TestClock(),
+      ids: _TestIds(),
+    );
+
+    expect(
+      (await service.getDocument('v3-document')).documentType,
+      DocumentType.plain,
+    );
   } finally {
     await currentStore?.close();
     if (await temporary.exists()) {

@@ -14,6 +14,9 @@
 - Flutter UI создаёт local workspaces и document tree, редактирует текст,
   перемещает документы, восстанавливает их из корзины и показывает состояния
   autosave/retry/conflict;
+- документы могут быть типизированы как ADR, Business Need или RFC; опциональная
+  AI-панель использует установленный `codex app-server`, применяет результат
+  только через revision-checked Local API и не блокирует offline-редактор;
 - пространства переименовываются, архивируются в read-only режиме,
   восстанавливаются и удаляются каскадно; запрос выхода flush-ит pending edit;
 - локальный поиск по заголовкам и содержимому обновляется атомарно с документами,
@@ -66,6 +69,7 @@ Release bundle создаётся в `dist/endless-windows-x64`. Запуск
 - [domain model](docs/architecture/domain-model.md);
 - [data flow](docs/architecture/data-flow.md);
 - [MCP and CLI](docs/architecture/mcp-and-cli.md);
+- [AI document editing](docs/architecture/ai-document-editing.md);
 - [security](docs/architecture/security.md);
 - [quality and testing](docs/architecture/quality-and-testing.md);
 - [delivery plan](docs/architecture/delivery-plan.md);

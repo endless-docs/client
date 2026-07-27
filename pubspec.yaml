@@ -10,6 +10,7 @@ workspace:
   - apps/locald
   - packages/client_application
   - packages/client_domain
+  - packages/codex_app_server
   - packages/local_api
   - packages/local_api_client
   - packages/local_attachments

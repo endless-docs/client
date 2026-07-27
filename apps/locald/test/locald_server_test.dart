@@ -52,7 +52,9 @@ void main() {
         commandId: 'document-command',
         workspaceId: requireString(workspace, 'workspace_id'),
         title: 'First note',
+        documentType: 'adr',
       );
+      expect(document['document_type'], 'adr');
       final JsonMap saved = await client.saveDocument(
         commandId: 'save-command',
         documentId: requireString(document, 'document_id'),
@@ -63,8 +65,10 @@ void main() {
             'payload': <String, Object?>{'text': 'Available without cloud'},
           },
         ],
+        documentType: 'rfc',
         expectedRevision: requireInt(document, 'revision'),
       );
+      expect(saved['document_type'], 'rfc');
       final JsonMap child = await client.createDocument(
         commandId: 'child-command',
         workspaceId: requireString(workspace, 'workspace_id'),
@@ -471,7 +475,7 @@ void main() {
         bytes: Stream<List<int>>.value(archiveBytes),
         contentLength: archiveBytes.length,
       );
-      expect(restored['format_version'], 1);
+      expect(restored['format_version'], 2);
       expect(restored['workspaces'], 1);
       expect(restored['documents'], 2);
       expect(restored['attachments'], 1);

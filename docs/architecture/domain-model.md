@@ -33,8 +33,10 @@ system_adrs:
 
 ## Document
 
-`Document` содержит stable ID, workspace ID, title, tree position, ordered blocks,
-revision и deletion state.
+`Document` содержит stable ID, workspace ID, title, document type, tree
+position, ordered blocks, revision и deletion state. `document_type` принимает
+`plain|adr|business_need|rfc`; отсутствующее значение прежних schema
+нормализуется в `plain`.
 
 Инварианты:
 

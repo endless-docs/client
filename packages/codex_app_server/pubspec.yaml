@@ -1,0 +1,13 @@
+name: codex_app_server
+description: Safe local Codex app-server client for Endless document editing.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+resolution: workspace
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

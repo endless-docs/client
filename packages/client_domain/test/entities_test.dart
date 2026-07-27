@@ -41,6 +41,18 @@ void main() {
       expect(updated.id, document.id);
       expect(updated.revision, 2);
       expect(updated.title, 'New');
+      expect(updated.documentType, DocumentType.plain);
+      expect(
+        document
+            .updateContent(
+              title: 'ADR',
+              blocks: const <Block>[],
+              documentType: DocumentType.adr,
+              now: created,
+            )
+            .toJson()['document_type'],
+        'adr',
+      );
     });
 
     test('workspace lifecycle advances revision without changing identity', () {

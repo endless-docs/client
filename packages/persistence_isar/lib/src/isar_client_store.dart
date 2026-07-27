@@ -370,6 +370,9 @@ class _IsarReader implements ClientStoreReader {
       parentId: record.parentId,
       position: record.position,
       blocks: List<Block>.unmodifiable(blocks),
+      documentType: record.documentType.isEmpty
+          ? DocumentType.plain
+          : documentTypeFromWireName(record.documentType),
       revision: record.revision,
       isDeleted: record.isDeleted,
       createdAt: record.createdAt,
@@ -453,6 +456,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
       ..workspaceId = document.workspaceId
       ..parentId = document.parentId
       ..title = document.title
+      ..documentType = document.documentType.wireName
       ..position = document.position
       ..revision = document.revision
       ..isDeleted = document.isDeleted

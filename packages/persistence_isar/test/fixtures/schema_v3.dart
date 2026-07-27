@@ -1,6 +1,6 @@
 import 'package:isar_community/isar.dart';
 
-part 'records.g.dart';
+part 'schema_v3.g.dart';
 
 @collection
 class WorkspaceRecord {
@@ -28,7 +28,6 @@ class DocumentRecord {
 
   String? parentId;
   late String title;
-  String documentType = 'plain';
   late int position;
   late int revision;
   late bool isDeleted;

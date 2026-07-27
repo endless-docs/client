@@ -71,6 +71,7 @@ cross-repository machine-readable contracts или общесистемными 
 | [Domain model](domain-model.md) | Workspaces, documents, blocks и operations |
 | [Data flow](data-flow.md) | Write/read/attachment flows |
 | [MCP and CLI](mcp-and-cli.md) | Headless surfaces и scopes |
+| [AI document editing](ai-document-editing.md) | Optional local Codex integration |
 | [Security](security.md) | Local threat controls |
 | [Quality and testing](quality-and-testing.md) | Tests, performance и reliability |
 | [Delivery plan](delivery-plan.md) | Work packages C0–C8 |

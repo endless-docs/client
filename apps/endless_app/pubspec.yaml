@@ -9,6 +9,7 @@ environment:
 resolution: workspace
 
 dependencies:
+  codex_app_server: any
   flutter:
     sdk: flutter
   local_api: any

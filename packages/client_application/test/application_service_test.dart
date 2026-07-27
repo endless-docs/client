@@ -85,6 +85,39 @@ void main() {
     expect(store.operations, hasLength(2));
   });
 
+  test(
+    'document type is created and updated with content atomically',
+    () async {
+      final CommandReceipt workspace = await service.createWorkspace(
+        commandId: 'typed-workspace',
+        name: 'Architecture',
+      );
+      final CommandReceipt created = await service.createDocument(
+        commandId: 'typed-document',
+        workspaceId: workspace.result['workspace_id']! as String,
+        title: 'Decision',
+        documentType: DocumentType.adr,
+      );
+      final String documentId = created.result['document_id']! as String;
+
+      expect(created.result['document_type'], 'adr');
+      final CommandReceipt saved = await service.saveDocument(
+        commandId: 'typed-save',
+        documentId: documentId,
+        title: 'Proposal',
+        blocks: const <BlockDraft>[],
+        documentType: DocumentType.rfc,
+        expectedRevision: created.result['revision']! as int,
+      );
+
+      expect(saved.result['document_type'], 'rfc');
+      expect(
+        (await service.getDocument(documentId)).documentType,
+        DocumentType.rfc,
+      );
+    },
+  );
+
   test('moving a document under its descendant is rejected', () async {
     final CommandReceipt workspace = await service.createWorkspace(
       commandId: 'workspace',
@@ -476,6 +509,7 @@ void main() {
         commandId: 'document',
         workspaceId: workspaceId,
         title: 'Offline source',
+        documentType: DocumentType.businessNeed,
       );
       final String documentId = document.result['document_id']! as String;
       await service.saveDocument(
@@ -518,6 +552,19 @@ void main() {
           .createBackupSnapshot();
       final ClientBackupSnapshot decoded = ClientBackupSnapshot.fromJson(
         jsonDecode(jsonEncode(original.toJson())) as Map<String, Object?>,
+      );
+      expect(decoded.documents.single.documentType, DocumentType.businessNeed);
+      final Map<String, Object?> legacyJson =
+          jsonDecode(jsonEncode(original.toJson())) as Map<String, Object?>;
+      legacyJson['format_version'] = 1;
+      for (final Map<String, Object?> document
+          in (legacyJson['documents']! as List<Object?>)
+              .cast<Map<String, Object?>>()) {
+        document.remove('document_type');
+      }
+      expect(
+        ClientBackupSnapshot.fromJson(legacyJson).documents.single.documentType,
+        DocumentType.plain,
       );
       final _MemoryStore restoredStore = _MemoryStore();
       final ClientApplicationService restored = ClientApplicationService(

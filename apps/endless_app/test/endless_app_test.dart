@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
+import 'package:codex_app_server/codex_app_server.dart';
 import 'package:endless_app/src/app_controller.dart';
 import 'package:endless_app/src/endless_app.dart';
 import 'package:flutter/material.dart';
@@ -320,6 +321,117 @@ void main() {
     expect(find.text('Локальный процесс не запустился.'), findsOneWidget);
     expect(find.text('Повторить'), findsOneWidget);
   });
+
+  testWidgets('applies and undoes an AI document replacement', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final _FakeDocumentAi ai = _FakeDocumentAi();
+    final AppController controller = AppController(
+      bootstrap: () async => api,
+      documentAi: ai,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Черновик', documentType: 'adr');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('AI-помощник'));
+    await tester.pumpAndSettle();
+    expect(find.text('Codex готов'), findsOneWidget);
+
+    controller.acceptAiDisclosure();
+    await controller.runDocumentAi('Сформируй ADR');
+    await tester.pumpAndSettle();
+
+    expect(controller.selectedDocument!['title'], 'ADR: Решение');
+    expect(
+      api.savedTextByDocument[controller.selectedDocumentId],
+      '## Context\nКонтекст решения.',
+    );
+    expect(controller.canUndoAiEdit, isTrue);
+
+    await controller.undoAiEdit();
+    await tester.pumpAndSettle();
+
+    expect(controller.selectedDocument!['title'], 'Черновик');
+    expect(api.savedTextByDocument[controller.selectedDocumentId], '');
+  });
+
+  test('does not apply an AI result over a newer manual revision', () async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final _BlockingDocumentAi ai = _BlockingDocumentAi();
+    final AppController controller = AppController(
+      bootstrap: () async => api,
+      documentAi: ai,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Черновик', documentType: 'adr');
+    controller.acceptAiDisclosure();
+
+    final Future<void> aiRun = controller.runDocumentAi('Обнови');
+    await ai.started.future;
+    final JsonMap source = controller.selectedDocument!;
+    await controller.saveDocument(
+      documentId: requireString(source, 'document_id'),
+      title: 'Ручная версия',
+      text: 'Пользовательский текст',
+      expectedRevision: requireInt(source, 'revision'),
+    );
+    ai.complete();
+    await aiRun;
+
+    expect(controller.selectedDocument!['title'], 'Ручная версия');
+    expect(controller.aiError, contains('Документ изменился'));
+  });
+}
+
+class _FakeDocumentAi implements DocumentAi {
+  @override
+  Future<void> cancel() async {}
+
+  @override
+  Future<DocumentAiAvailability> checkAvailability() async =>
+      DocumentAiAvailability.ready;
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<void> reset() async {}
+
+  @override
+  Future<DocumentAiResult> run({
+    required DocumentAiSnapshot snapshot,
+    required String instruction,
+  }) async => const DocumentAiResult(
+    action: DocumentAiAction.replaceDocument,
+    message: 'Документ обновлён.',
+    questions: <String>[],
+    title: 'ADR: Решение',
+    content: '## Context\nКонтекст решения.',
+  );
+}
+
+final class _BlockingDocumentAi extends _FakeDocumentAi {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> _release = Completer<void>();
+
+  void complete() => _release.complete();
+
+  @override
+  Future<DocumentAiResult> run({
+    required DocumentAiSnapshot snapshot,
+    required String instruction,
+  }) async {
+    started.complete();
+    await _release.future;
+    return super.run(snapshot: snapshot, instruction: instruction);
+  }
 }
 
 final class _FakeLocalApi implements EndlessLocalApi {
@@ -432,6 +544,7 @@ final class _FakeLocalApi implements EndlessLocalApi {
     required String workspaceId,
     required String title,
     String? parentId,
+    String documentType = 'plain',
   }) async {
     final String id = 'document-${_documents.length + 1}';
     final int position = _documents
@@ -448,6 +561,7 @@ final class _FakeLocalApi implements EndlessLocalApi {
       'parent_id': parentId,
       'position': position,
       'blocks': <JsonMap>[],
+      'document_type': documentType,
       'revision': 1,
       'is_deleted': false,
       'created_at': '2026-01-01T00:00:00Z',
@@ -463,6 +577,7 @@ final class _FakeLocalApi implements EndlessLocalApi {
     required String documentId,
     required String title,
     required List<JsonMap> blocks,
+    String? documentType,
     int? expectedRevision,
   }) async {
     saveCommandIds.add(commandId);
@@ -480,6 +595,8 @@ final class _FakeLocalApi implements EndlessLocalApi {
     final JsonMap saved = <String, Object?>{
       ..._documents[index],
       'title': title,
+      'document_type':
+          documentType ?? _documents[index]['document_type'] ?? 'plain',
       'blocks': <JsonMap>[
         <String, Object?>{
           ...blocks.single,
@@ -768,7 +885,7 @@ final class _FakeLocalApi implements EndlessLocalApi {
     int? contentLength,
   }) async {
     await bytes.drain<void>();
-    return <String, Object?>{'format_version': 1};
+    return <String, Object?>{'format_version': 2};
   }
 
   int _indexOf(String documentId) {

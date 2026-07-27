@@ -36,6 +36,11 @@ Flutter UI / CLI
 Подтверждённые свойства:
 
 - Flutter UI не импортирует domain, application или Isar packages;
+- optional Codex app-server adapter изолирован от persistence, работает в
+  read-only/no-tools режиме и возвращает structured document actions;
+- ADR/Business Need/RFC сохраняются как document metadata; AI replacement
+  проходит через обычный expected-revision commit, stale result не
+  перезаписывает ручную правку, а последний AI commit имеет bounded undo;
 - pure Dart `locald` является единственной composition root для Isar;
 - endpoint слушает только `127.0.0.1`, требует session proof и ограничивает
   request size;

@@ -29,6 +29,8 @@ system_adrs:
 3. MCP server / CLI → Local API.
 4. `locald` → Isar/filesystem/keyring.
 5. Installer/update artifact → executable installation.
+6. Flutter UI → local Codex app-server → OpenAI service, только после explicit
+   disclosure пользователя.
 
 ## Threats and required controls
 
@@ -59,6 +61,12 @@ system_adrs:
 
 Client MVP не требует cloud credentials. Local API session material хранится в
 memory/protected runtime files с коротким lifecycle.
+
+Optional AI не читает и не хранит Codex credentials: app-server использует
+существующую локальную авторизацию. Endless передаёт только тип, заголовок,
+текст текущего документа и пользовательскую команду; IDs, другие документы,
+поиск и вложения не передаются. AI threads ephemeral, transcript хранится
+только в памяти UI.
 
 Будущие refresh/device credentials должны храниться в OS secure storage и не
 попадать в Isar, Operation Log, backup или diagnostics.

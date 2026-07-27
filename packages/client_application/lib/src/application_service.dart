@@ -479,6 +479,7 @@ final class ClientApplicationService {
     required String workspaceId,
     required String title,
     String? parentId,
+    DocumentType documentType = DocumentType.plain,
   }) {
     final String normalizedTitle = validateDocumentTitle(title);
     final String documentId = _ids.nextId();
@@ -490,6 +491,7 @@ final class ClientApplicationService {
         'workspace_id': workspaceId,
         'title': normalizedTitle,
         'parent_id': parentId,
+        'document_type': documentType.wireName,
       },
       workspaceId: workspaceId,
       objectId: documentId,
@@ -516,6 +518,7 @@ final class ClientApplicationService {
           parentId: parentId,
           position: position,
           blocks: const <Block>[],
+          documentType: documentType,
           revision: 1,
           isDeleted: false,
           createdAt: now,
@@ -533,6 +536,7 @@ final class ClientApplicationService {
     required String documentId,
     required String title,
     required List<BlockDraft> blocks,
+    DocumentType? documentType,
     int? expectedRevision,
   }) {
     final String normalizedTitle = validateDocumentTitle(title);
@@ -557,6 +561,7 @@ final class ClientApplicationService {
               },
             )
             .toList(),
+        'document_type': documentType?.wireName,
         'expected_revision': expectedRevision,
       },
       workspaceId: '',
@@ -587,6 +592,7 @@ final class ClientApplicationService {
         final Document updated = document.updateContent(
           title: normalizedTitle,
           blocks: updatedBlocks,
+          documentType: documentType,
           now: _clock.now(),
         );
         await writer.putDocument(updated);

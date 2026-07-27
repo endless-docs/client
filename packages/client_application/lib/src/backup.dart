@@ -1,6 +1,6 @@
 import 'package:client_domain/client_domain.dart';
 
-const int clientBackupFormatVersion = 1;
+const int clientBackupFormatVersion = 2;
 const int _maximumSignedInt64 = 0x7fffffffffffffff;
 
 final class BackupSnapshotException implements Exception {
@@ -57,7 +57,8 @@ final class ClientBackupSnapshot {
 
   factory ClientBackupSnapshot.fromJson(Map<String, Object?> json) {
     try {
-      if (_requiredInt(json, 'format_version') != clientBackupFormatVersion) {
+      final int formatVersion = _requiredInt(json, 'format_version');
+      if (formatVersion != 1 && formatVersion != clientBackupFormatVersion) {
         throw const BackupSnapshotException(
           'BackupVersionUnsupported',
           'Backup format version is unsupported.',
@@ -70,10 +71,12 @@ final class ClientBackupSnapshot {
           json,
           'workspaces',
         ).map(_workspaceFromJson).toList(),
-        documents: _requiredMaps(
-          json,
-          'documents',
-        ).map(_documentFromJson).toList(),
+        documents: _requiredMaps(json, 'documents')
+            .map(
+              (Map<String, Object?> document) =>
+                  _documentFromJson(document, formatVersion),
+            )
+            .toList(),
         attachments: _requiredMaps(
           json,
           'attachments',
@@ -226,7 +229,7 @@ Workspace _workspaceFromJson(Map<String, Object?> json) => Workspace(
   updatedAt: _requiredDateTime(json, 'updated_at'),
 );
 
-Document _documentFromJson(Map<String, Object?> json) {
+Document _documentFromJson(Map<String, Object?> json, int formatVersion) {
   final String documentId = _identifier(json, 'document_id');
   return Document(
     id: documentId,
@@ -237,6 +240,9 @@ Document _documentFromJson(Map<String, Object?> json) {
     blocks: _requiredMaps(json, 'blocks')
         .map((Map<String, Object?> block) => _blockFromJson(block, documentId))
         .toList(growable: false),
+    documentType: formatVersion == 1
+        ? DocumentType.plain
+        : documentTypeFromWireName(_requiredString(json, 'document_type')),
     revision: _positiveInt(json, 'revision'),
     isDeleted: _requiredBool(json, 'is_deleted'),
     createdAt: _requiredDateTime(json, 'created_at'),

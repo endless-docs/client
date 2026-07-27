@@ -79,6 +79,12 @@ Semantic envelope:
 `CreateDocument`, `GetDocument`, `ListDocumentTree`, `RenameDocument`,
 `MoveDocument`, `ApplyBlockChanges`, `DeleteDocument`, `RestoreDocument`.
 
+Local API 1.1 добавляет optional `document_type` в `CreateDocument` и
+`ApplyBlockChanges`. Create использует `plain` по умолчанию, а apply сохраняет
+текущий тип при отсутствии поля. Projection всегда возвращает
+`document_type`, поэтому AI может атомарно изменить тип и content одной
+revision-checked командой.
+
 ### Search
 
 `SearchDocuments`, `GetSearchStatus`, `RebuildSearchIndex`.

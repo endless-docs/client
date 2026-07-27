@@ -435,12 +435,16 @@ final class LocaldServer {
         workspaceId: requireString(payload, 'workspace_id'),
         title: requireString(payload, 'title'),
         parentId: payload['parent_id'] as String?,
+        documentType: _documentType(payload['document_type']),
       ),
       'ApplyBlockChanges' => await _application.saveDocument(
         commandId: commandId,
         documentId: requireString(payload, 'document_id'),
         title: requireString(payload, 'title'),
         blocks: requireMapList(payload, 'blocks').map(_blockDraft).toList(),
+        documentType: payload.containsKey('document_type')
+            ? _documentType(payload['document_type'])
+            : null,
         expectedRevision: payload['expected_revision'] as int?,
       ),
       'MoveDocument' => await _application.moveDocument(
@@ -858,6 +862,20 @@ final class _SystemClock implements Clock {
 
   @override
   DateTime now() => DateTime.now().toUtc();
+}
+
+DocumentType _documentType(Object? value) {
+  if (value == null) {
+    return DocumentType.plain;
+  }
+  if (value is! String) {
+    throw const FormatException('document_type must be a string.');
+  }
+  try {
+    return documentTypeFromWireName(value);
+  } on ArgumentError {
+    throw FormatException('Unsupported document_type "$value".');
+  }
 }
 
 final class _SecureIdGenerator implements IdGenerator {
