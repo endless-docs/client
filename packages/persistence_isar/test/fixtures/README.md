@@ -1,16 +1,15 @@
 # Isar migration fixtures
 
-`schema_v1.dart` is the released schema-v1 shape before the search projection
-was introduced. Its generated schema creates a real legacy Isar profile during
-the integration test; the current adapter then opens that profile, verifies all
-authoritative workspace/document/block data, normalizes legacy field defaults,
-and rebuilds search before readiness.
+`schema_v1.dart` is the released shape before search projection/checkpoints.
+`schema_v2.dart` is the released shape before authoritative attachment metadata
+and filesystem commit markers. Their generated schemas create real legacy Isar
+profiles; the current adapter then opens those files and verifies migration.
 
-Regenerate `schema_v1.g.dart` with:
+Regenerate generated fixture schemas with:
 
 ```powershell
 dart run build_runner build
 ```
 
-Do not update the v1 shape when the current production schema changes. Add a
-new versioned fixture instead.
+Do not update an existing fixture when the production schema changes. Add a new
+versioned fixture instead.

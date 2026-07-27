@@ -316,6 +316,18 @@ final class LocalAttachmentStore {
     );
   }
 
+  Future<void> releaseToken(String token) async {
+    _validateToken(token);
+    final File journal = _committedJournal(token);
+    await _rejectLink(journal.path);
+    if (!await journal.exists()) {
+      return;
+    }
+    final StagedAttachment staged = await _readJournal(journal, token);
+    await _verifyFinal(staged);
+    await journal.delete();
+  }
+
   Future<int> cleanupAbandoned({required Duration olderThan}) async {
     if (olderThan.isNegative) {
       throw const AttachmentStoreException(
@@ -340,6 +352,15 @@ final class LocalAttachmentStore {
         if (!await _commitJournal(token).exists() &&
             (await entity.stat()).modified.toUtc().isBefore(threshold)) {
           await _deleteIfExists(_stagingFile(token));
+          await entity.delete();
+          removed += 1;
+        }
+      } else if (name.endsWith('.committed.json')) {
+        final String? token = _tryJournalToken(entity.path, '.committed.json');
+        if (token != null &&
+            (await entity.stat()).modified.toUtc().isBefore(threshold)) {
+          final StagedAttachment staged = await _readJournal(entity, token);
+          await _verifyFinal(staged);
           await entity.delete();
           removed += 1;
         }
@@ -580,6 +601,9 @@ final class LocalAttachmentStore {
 
 final RegExp _tokenPattern = RegExp(r'^[A-Za-z0-9_-]{20,64}$');
 final RegExp _hashPattern = RegExp(r'^[a-f0-9]{64}$');
+final RegExp _mediaTypePattern = RegExp(
+  r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$",
+);
 
 final class _DigestSink implements Sink<Digest> {
   const _DigestSink(this._onDigest);
@@ -634,7 +658,7 @@ String _validateMediaType(String value) {
   final String normalized = value.trim().toLowerCase();
   if (normalized.isEmpty ||
       normalized.length > 200 ||
-      normalized.contains(RegExp(r'[\u0000\r\n]'))) {
+      !_mediaTypePattern.hasMatch(normalized)) {
     throw const AttachmentStoreException(
       'InvalidArgument',
       'Attachment media type is invalid.',

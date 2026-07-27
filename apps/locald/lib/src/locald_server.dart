@@ -7,8 +7,16 @@ import 'dart:typed_data';
 import 'package:client_application/client_application.dart';
 import 'package:client_domain/client_domain.dart';
 import 'package:local_api/local_api.dart';
+import 'package:local_attachments/local_attachments.dart';
 import 'package:persistence_isar/persistence_isar.dart';
 import 'package:platform_runtime/platform_runtime.dart';
+
+enum LocaldWriteStep {
+  afterAttachmentMetadataCommit,
+  afterAttachmentContentCommit,
+}
+
+typedef LocaldFaultInjector = void Function(LocaldWriteStep step);
 
 final class LocaldServer {
   LocaldServer._({
@@ -17,10 +25,14 @@ final class LocaldServer {
     required ProcessLock processLock,
     required HttpServer httpServer,
     required String sessionProof,
+    required LocalAttachmentStore attachmentStore,
+    required LocaldFaultInjector? faultInjector,
   }) : _store = store,
        _processLock = processLock,
        _httpServer = httpServer,
        _sessionProof = sessionProof,
+       _attachmentStore = attachmentStore,
+       _faultInjector = faultInjector,
        _application = ClientApplicationService(
          store: store,
          clock: const _SystemClock(),
@@ -32,6 +44,8 @@ final class LocaldServer {
   final ProcessLock _processLock;
   final HttpServer _httpServer;
   final String _sessionProof;
+  final LocalAttachmentStore _attachmentStore;
+  final LocaldFaultInjector? _faultInjector;
   final ClientApplicationService _application;
   late final StreamSubscription<HttpRequest> _requests;
   bool _closed = false;
@@ -43,6 +57,7 @@ final class LocaldServer {
     String? profileRoot,
     String? nativeLibraryPath,
     bool allowDevelopmentIsarDownload = false,
+    LocaldFaultInjector? faultInjector,
   }) async {
     final ProfilePaths paths = ProfilePaths.resolve(
       profileId: profileId,
@@ -55,6 +70,12 @@ final class LocaldServer {
     IsarClientStore? store;
     HttpServer? server;
     try {
+      final LocalAttachmentStore attachmentStore =
+          await LocalAttachmentStore.open(
+            attachmentsRoot: paths.attachments.path,
+            stagingRoot: paths.attachmentStaging.path,
+            maximumBytes: maximumAttachmentBytes,
+          );
       store = await IsarClientStore.open(
         directory: paths.database.path,
         nativeLibraryPath: nativeLibraryPath,
@@ -72,8 +93,11 @@ final class LocaldServer {
         processLock: processLock,
         httpServer: server,
         sessionProof: proof,
+        attachmentStore: attachmentStore,
+        faultInjector: faultInjector,
       );
       await locald._application.ensureSearchIndex();
+      await locald._recoverAttachments();
       locald._requests = server.listen(locald._handleRequest);
       await paths.writeEndpoint(
         EndpointManifest(
@@ -98,7 +122,9 @@ final class LocaldServer {
         request.headers.value('x-request-id') ??
         DateTime.now().microsecondsSinceEpoch.toString();
     try {
-      if (request.method != 'POST') {
+      final bool isAttachmentDownload =
+          request.uri.path == '/v1/attachments/content';
+      if (request.method != (isAttachmentDownload ? 'GET' : 'POST')) {
         throw const _HttpApiError(
           status: HttpStatus.methodNotAllowed,
           error: LocalApiException(
@@ -118,6 +144,28 @@ final class LocaldServer {
             retryable: false,
           ),
         );
+      }
+      if (request.uri.path == '/v1/attachments/stage') {
+        if (request.contentLength > maximumAttachmentBytes) {
+          throw const _HttpApiError(
+            status: HttpStatus.requestEntityTooLarge,
+            error: LocalApiException(
+              code: 'AttachmentTooLarge',
+              message: 'Attachment exceeds the supported byte limit.',
+              retryable: false,
+            ),
+          );
+        }
+        final JsonMap data = await _stageAttachment(request);
+        await _respond(request.response, HttpStatus.ok, <String, Object?>{
+          'ok': true,
+          'data': data,
+        });
+        return;
+      }
+      if (isAttachmentDownload) {
+        await _downloadAttachment(request);
+        return;
       }
       final int contentLength = request.contentLength;
       if (contentLength > maximumRequestBytes) {
@@ -175,6 +223,19 @@ final class LocaldServer {
           code: failure.code,
           message: failure.message,
           retryable: failure.code == 'StorageBusy',
+        ),
+        correlationId,
+      );
+    } on AttachmentStoreException catch (failure) {
+      await _respondError(
+        request.response,
+        _statusForAttachmentError(failure.code),
+        LocalApiException(
+          code: failure.code,
+          message: failure.message,
+          retryable:
+              failure.code == 'AttachmentRecoveryRequired' ||
+              failure.code == 'AttachmentNotFound',
         ),
         correlationId,
       );
@@ -243,6 +304,7 @@ final class LocaldServer {
         'command_deduplication',
         'search',
         'search_rebuild',
+        'attachments',
       ],
       'compatibility': 'compatible',
     };
@@ -269,6 +331,15 @@ final class LocaldServer {
       },
       'GetDocument' => (await _application.getDocument(
         requireString(payload, 'document_id'),
+      )).toJson(),
+      'ListAttachments' => <String, Object?>{
+        'attachments': (await _application.listAttachments(
+          requireString(payload, 'document_id'),
+          includeDeleted: payload['include_deleted'] == true,
+        )).map((Attachment attachment) => attachment.toJson()).toList(),
+      },
+      'GetAttachment' => (await _application.getAttachment(
+        requireString(payload, 'attachment_id'),
       )).toJson(),
       'SearchDocuments' => <String, Object?>{
         'results': (await _application.searchDocuments(
@@ -348,6 +419,17 @@ final class LocaldServer {
         documentId: requireString(payload, 'document_id'),
         expectedRevision: payload['expected_revision'] as int?,
       ),
+      'AttachStagedFile' => await _attachStagedFile(
+        commandId: commandId,
+        documentId: requireString(payload, 'document_id'),
+        stagingToken: requireString(payload, 'staging_token'),
+        expectedDocumentRevision: payload['expected_document_revision'] as int?,
+      ),
+      'DeleteAttachment' => await _application.deleteAttachment(
+        commandId: commandId,
+        attachmentId: requireString(payload, 'attachment_id'),
+        expectedRevision: payload['expected_revision'] as int?,
+      ),
       'RebuildSearchIndex' => await _application.rebuildSearchIndex(
         commandId: commandId,
       ),
@@ -365,6 +447,170 @@ final class LocaldServer {
       'commit_sequence': receipt.commitSequence,
       'was_replay': receipt.wasReplay,
     };
+  }
+
+  Future<JsonMap> _stageAttachment(HttpRequest request) async {
+    final String? fileName = request.uri.queryParameters['file_name'];
+    final String? mediaType = request.uri.queryParameters['media_type'];
+    if (fileName == null || mediaType == null) {
+      throw const FormatException(
+        'Attachment file_name and media_type are required.',
+      );
+    }
+    final StagedAttachment staged = await _attachmentStore.stage(
+      bytes: request,
+      fileName: fileName,
+      mediaType: mediaType,
+    );
+    return staged.toJson();
+  }
+
+  Future<void> _downloadAttachment(HttpRequest request) async {
+    final String? attachmentId = request.uri.queryParameters['attachment_id'];
+    if (attachmentId == null || attachmentId.isEmpty) {
+      throw const FormatException('Attachment attachment_id is required.');
+    }
+    final Attachment attachment = await _application.getAttachment(
+      attachmentId,
+    );
+    final AttachmentContent content = await _attachmentStore.openContent(
+      attachment.sha256,
+    );
+    if (content.size != attachment.size) {
+      throw const AttachmentStoreException(
+        'AttachmentIntegrityFailure',
+        'Attachment bytes do not match authoritative metadata.',
+      );
+    }
+    request.response
+      ..statusCode = HttpStatus.ok
+      ..contentLength = content.size
+      ..headers.set(HttpHeaders.contentTypeHeader, attachment.mediaType)
+      ..headers.set('x-endless-attachment-id', attachment.id)
+      ..headers.set(
+        'x-endless-file-name',
+        Uri.encodeComponent(attachment.fileName),
+      )
+      ..headers.set('x-endless-sha256', attachment.sha256)
+      ..headers.set(
+        'content-disposition',
+        "attachment; filename*=UTF-8''${Uri.encodeComponent(attachment.fileName)}",
+      );
+    await request.response.addStream(content.bytes);
+    await request.response.close();
+  }
+
+  Future<CommandReceipt> _attachStagedFile({
+    required String commandId,
+    required String documentId,
+    required String stagingToken,
+    int? expectedDocumentRevision,
+  }) async {
+    final StagedAttachment staged;
+    try {
+      staged = await _attachmentStore.describe(stagingToken);
+    } on AttachmentStoreException catch (failure) {
+      if (failure.code != 'AttachmentNotFound') {
+        rethrow;
+      }
+      final CommandReceipt? replay = await _application.replayAttachStagedFile(
+        commandId: commandId,
+        documentId: documentId,
+        stagingToken: stagingToken,
+        expectedDocumentRevision: expectedDocumentRevision,
+      );
+      if (replay == null) {
+        rethrow;
+      }
+      await _verifyCommittedAttachment(
+        requireString(replay.result, 'sha256'),
+        requireInt(replay.result, 'size'),
+      );
+      return replay;
+    }
+    final CommandReceipt receipt = await _application.attachStagedFile(
+      commandId: commandId,
+      documentId: documentId,
+      staged: StagedAttachmentDraft(
+        stagingToken: staged.token,
+        fileName: staged.fileName,
+        mediaType: staged.mediaType,
+        sha256: staged.sha256,
+        size: staged.size,
+      ),
+      expectedDocumentRevision: expectedDocumentRevision,
+    );
+    _faultInjector?.call(LocaldWriteStep.afterAttachmentMetadataCommit);
+    final String attachmentId = requireString(receipt.result, 'attachment_id');
+    final AttachmentCommitMarker? marker = await _application
+        .pendingAttachmentCommit(attachmentId);
+    if (marker == null) {
+      await _verifyCommittedAttachment(
+        requireString(receipt.result, 'sha256'),
+        requireInt(receipt.result, 'size'),
+      );
+      await _attachmentStore.releaseToken(stagingToken);
+    } else {
+      await _finishAttachmentCommit(marker);
+    }
+    return receipt;
+  }
+
+  Future<void> _finishAttachmentCommit(AttachmentCommitMarker marker) async {
+    try {
+      final StagedAttachment staged = await _attachmentStore.describe(
+        marker.stagingToken,
+      );
+      if (staged.sha256 != marker.sha256 || staged.size != marker.size) {
+        throw const AttachmentStoreException(
+          'AttachmentIntegrityFailure',
+          'Staged bytes do not match their authoritative recovery marker.',
+        );
+      }
+      final StagedAttachment committed = await _attachmentStore.commit(
+        marker.stagingToken,
+      );
+      if (committed.sha256 != marker.sha256 || committed.size != marker.size) {
+        throw const AttachmentStoreException(
+          'AttachmentIntegrityFailure',
+          'Committed bytes do not match their authoritative recovery marker.',
+        );
+      }
+    } on AttachmentStoreException catch (failure) {
+      if (failure.code != 'AttachmentNotFound') {
+        rethrow;
+      }
+      await _verifyCommittedAttachment(marker.sha256, marker.size);
+    }
+    _faultInjector?.call(LocaldWriteStep.afterAttachmentContentCommit);
+    await _application.completeAttachmentCommit(marker);
+    await _attachmentStore.releaseToken(marker.stagingToken);
+  }
+
+  Future<void> _verifyCommittedAttachment(String hash, int size) async {
+    final AttachmentContent content = await _attachmentStore.openContent(hash);
+    if (content.size != size) {
+      throw const AttachmentStoreException(
+        'AttachmentIntegrityFailure',
+        'Committed bytes do not match authoritative metadata.',
+      );
+    }
+  }
+
+  Future<void> _recoverAttachments() async {
+    for (final AttachmentCommitMarker marker
+        in await _application.pendingAttachmentCommits()) {
+      await _finishAttachmentCommit(marker);
+    }
+    final AttachmentRecoveryReport report = await _attachmentStore
+        .recoverPendingCommits();
+    if (report.warnings.isNotEmpty) {
+      throw AttachmentStoreException(
+        'AttachmentRecoveryRequired',
+        'Attachment recovery found ${report.warnings.length} invalid '
+            'journal(s).',
+      );
+    }
   }
 
   static BlockDraft _blockDraft(JsonMap json) {
@@ -459,8 +705,23 @@ final class LocaldServer {
   }
 
   static int _statusForApplicationError(String code) => switch (code) {
-    'WorkspaceNotFound' || 'DocumentNotFound' => HttpStatus.notFound,
-    'RevisionConflict' || 'CommandIdReused' => HttpStatus.conflict,
+    'WorkspaceNotFound' ||
+    'DocumentNotFound' ||
+    'AttachmentNotFound' => HttpStatus.notFound,
+    'RevisionConflict' ||
+    'CommandIdReused' ||
+    'AttachmentRecoveryConflict' => HttpStatus.conflict,
+    _ => HttpStatus.badRequest,
+  };
+
+  static int _statusForAttachmentError(String code) => switch (code) {
+    'AttachmentNotFound' => HttpStatus.notFound,
+    'AttachmentTooLarge' => HttpStatus.requestEntityTooLarge,
+    'AttachmentRecoveryRequired' => HttpStatus.serviceUnavailable,
+    'AttachmentIntegrityFailure' ||
+    'AttachmentJournalInvalid' ||
+    'AttachmentJournalConflict' ||
+    'UnsafeAttachmentPath' => HttpStatus.conflict,
     _ => HttpStatus.badRequest,
   };
 }

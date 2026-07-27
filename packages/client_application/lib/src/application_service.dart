@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:client_domain/client_domain.dart';
 
+import 'attachments.dart';
 import 'ports.dart';
 import 'search.dart';
 
@@ -91,6 +92,48 @@ final class ClientApplicationService {
       );
     }
     return document;
+  }
+
+  Future<List<Attachment>> listAttachments(
+    String documentId, {
+    bool includeDeleted = false,
+  }) async {
+    final Document document = await getDocument(documentId);
+    await getWorkspace(document.workspaceId);
+    return _store.read((ClientStoreReader reader) async {
+      final List<Attachment> visible = <Attachment>[];
+      for (final Attachment attachment in await reader.listAttachments(
+        documentId,
+        includeDeleted: includeDeleted,
+      )) {
+        if (await reader.getAttachmentCommitMarker(attachment.id) == null) {
+          visible.add(attachment);
+        }
+      }
+      return visible;
+    });
+  }
+
+  Future<Attachment> getAttachment(String attachmentId) async {
+    final Attachment? attachment = await _store.read((
+      ClientStoreReader reader,
+    ) async {
+      final Attachment? candidate = await reader.getAttachment(attachmentId);
+      if (candidate == null ||
+          candidate.isDeleted ||
+          await reader.getAttachmentCommitMarker(attachmentId) != null) {
+        return null;
+      }
+      return candidate;
+    });
+    if (attachment == null) {
+      throw const ApplicationException(
+        'AttachmentNotFound',
+        'Attachment was not found.',
+      );
+    }
+    await getWorkspace(attachment.workspaceId);
+    return attachment;
   }
 
   Future<List<SearchHit>> searchDocuments({
@@ -310,6 +353,14 @@ final class ClientApplicationService {
           affectedDocumentIds.add(document.id);
         }
         await writer.removeSearchProjection(document.id);
+        for (final Attachment attachment in await writer.listAttachments(
+          document.id,
+          includeDeleted: true,
+        )) {
+          if (!attachment.isDeleted) {
+            await writer.putAttachment(attachment.markDeleted(now));
+          }
+        }
       }
       return <String, Object?>{
         ...deleted.toJson(),
@@ -439,6 +490,188 @@ final class ClientApplicationService {
       },
     );
   }
+
+  Future<CommandReceipt> attachStagedFile({
+    required String commandId,
+    required String documentId,
+    required StagedAttachmentDraft staged,
+    int? expectedDocumentRevision,
+  }) {
+    final String token = validateAttachmentStagingToken(staged.stagingToken);
+    final String fileName = validateAttachmentFileName(staged.fileName);
+    final String mediaType = validateAttachmentMediaType(staged.mediaType);
+    final String hash = validateAttachmentHash(staged.sha256);
+    final int size = validateAttachmentSize(staged.size);
+    final String attachmentId = _ids.nextId();
+    final DateTime now = _clock.now();
+    return _execute(
+      commandId: commandId,
+      method: 'AttachStagedFile',
+      fingerprintPayload: <String, Object?>{
+        'document_id': documentId,
+        'staging_token': token,
+        'file_name': fileName,
+        'media_type': mediaType,
+        'sha256': hash,
+        'size': size,
+        'expected_document_revision': expectedDocumentRevision,
+      },
+      workspaceId: '',
+      objectId: attachmentId,
+      baseRevision: 0,
+      transition: (ClientStoreWriter writer) async {
+        final Document document = await _requireDocument(writer, documentId);
+        await _requireWorkspace(writer, document.workspaceId);
+        if (document.isDeleted) {
+          throw const ApplicationException(
+            'DocumentNotFound',
+            'Deleted document cannot receive attachments.',
+          );
+        }
+        _checkRevision(document.revision, expectedDocumentRevision);
+        final Attachment attachment = Attachment(
+          id: attachmentId,
+          workspaceId: document.workspaceId,
+          documentId: document.id,
+          fileName: fileName,
+          mediaType: mediaType,
+          sha256: hash,
+          size: size,
+          revision: 1,
+          isDeleted: false,
+          createdAt: now,
+          updatedAt: now,
+        );
+        await writer.putAttachment(attachment);
+        await writer.putAttachmentCommitMarker(
+          AttachmentCommitMarker(
+            attachmentId: attachment.id,
+            stagingToken: token,
+            sha256: hash,
+            size: size,
+            createdAt: now,
+          ),
+        );
+        return attachment.toJson();
+      },
+    );
+  }
+
+  Future<CommandReceipt?> replayAttachStagedFile({
+    required String commandId,
+    required String documentId,
+    required String stagingToken,
+    int? expectedDocumentRevision,
+  }) {
+    if (commandId.isEmpty || commandId.length > 200) {
+      throw const ApplicationException(
+        'InvalidArgument',
+        'A bounded command_id is required.',
+      );
+    }
+    final String token = validateAttachmentStagingToken(stagingToken);
+    return _store.read((ClientStoreReader reader) async {
+      final CommandOutcome? existing = await reader.getCommandOutcome(
+        commandId,
+      );
+      if (existing == null) {
+        return null;
+      }
+      if (existing.method != 'AttachStagedFile') {
+        throw const ApplicationException(
+          'CommandIdReused',
+          'command_id was already used for another request.',
+        );
+      }
+      final Object? decoded = jsonDecode(existing.fingerprint);
+      if (decoded is! Map<String, Object?> ||
+          decoded['document_id'] != documentId ||
+          decoded['staging_token'] != token ||
+          decoded['expected_document_revision'] != expectedDocumentRevision) {
+        throw const ApplicationException(
+          'CommandIdReused',
+          'command_id was already used for another request.',
+        );
+      }
+      return CommandReceipt(
+        result: existing.result,
+        commitSequence: existing.commitSequence,
+        wasReplay: true,
+      );
+    });
+  }
+
+  Future<CommandReceipt> deleteAttachment({
+    required String commandId,
+    required String attachmentId,
+    int? expectedRevision,
+  }) => _execute(
+    commandId: commandId,
+    method: 'DeleteAttachment',
+    fingerprintPayload: <String, Object?>{
+      'attachment_id': attachmentId,
+      'expected_revision': expectedRevision,
+    },
+    workspaceId: '',
+    objectId: attachmentId,
+    baseRevision: expectedRevision ?? 0,
+    transition: (ClientStoreWriter writer) async {
+      final Attachment? attachment = await writer.getAttachment(attachmentId);
+      if (attachment == null ||
+          attachment.isDeleted ||
+          await writer.getAttachmentCommitMarker(attachmentId) != null) {
+        throw const ApplicationException(
+          'AttachmentNotFound',
+          'Attachment was not found.',
+        );
+      }
+      final Document document = await _requireDocument(
+        writer,
+        attachment.documentId,
+      );
+      await _requireWorkspace(writer, attachment.workspaceId);
+      if (document.isDeleted) {
+        throw const ApplicationException(
+          'DocumentNotFound',
+          'Deleted document attachments cannot be changed.',
+        );
+      }
+      _checkRevision(attachment.revision, expectedRevision);
+      final Attachment deleted = attachment.markDeleted(_clock.now());
+      await writer.putAttachment(deleted);
+      return deleted.toJson();
+    },
+  );
+
+  Future<List<AttachmentCommitMarker>> pendingAttachmentCommits() =>
+      _store.read(
+        (ClientStoreReader reader) => reader.listPendingAttachmentCommits(),
+      );
+
+  Future<AttachmentCommitMarker?> pendingAttachmentCommit(
+    String attachmentId,
+  ) => _store.read(
+    (ClientStoreReader reader) =>
+        reader.getAttachmentCommitMarker(attachmentId),
+  );
+
+  Future<void> completeAttachmentCommit(AttachmentCommitMarker expected) =>
+      _store.write((ClientStoreWriter writer) async {
+        final AttachmentCommitMarker? current = await writer
+            .getAttachmentCommitMarker(expected.attachmentId);
+        if (current == null) {
+          return;
+        }
+        if (current.stagingToken != expected.stagingToken ||
+            current.sha256 != expected.sha256 ||
+            current.size != expected.size) {
+          throw const ApplicationException(
+            'AttachmentRecoveryConflict',
+            'Attachment recovery marker changed unexpectedly.',
+          );
+        }
+        await writer.removeAttachmentCommitMarker(expected.attachmentId);
+      });
 
   Future<CommandReceipt> moveDocument({
     required String commandId,

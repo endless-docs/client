@@ -105,6 +105,8 @@ Real UI client or test harness + real `locald` process:
 - incompatible component versions;
 - concurrent UI/MCP/CLI calls;
 - profile separation.
+- attachment stream larger than JSON frame, content dedup/download/cold reopen;
+- startup repair after metadata commit and after filesystem content commit.
 
 ### Flutter tests
 

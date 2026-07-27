@@ -263,6 +263,285 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'streams, deduplicates, downloads, and cold-reopens attachments',
+    () async {
+      final Directory temporary = await _temporaryProfile('attachments');
+      addTearDown(() => _deleteProfile(temporary));
+      LocaldServer server = await _startLocald(temporary);
+      HttpLocalApiClient client = await _clientFor(server);
+      addTearDown(() async {
+        await client.close();
+        await server.close();
+      });
+
+      final JsonMap workspace = await client.createWorkspace(
+        commandId: 'workspace',
+        name: 'Files',
+      );
+      final JsonMap document = await client.createDocument(
+        commandId: 'document',
+        workspaceId: requireString(workspace, 'workspace_id'),
+        title: 'Attachment owner',
+      );
+      final int byteCount = maximumRequestBytes + 256 * 1024;
+      final JsonMap firstStage = await client.stageAttachment(
+        bytes: _patternBytes(byteCount),
+        fileName: 'offline.bin',
+        mediaType: 'application/octet-stream',
+        contentLength: byteCount,
+      );
+      final JsonMap first = await client.attachStagedFile(
+        commandId: 'attach-first',
+        documentId: requireString(document, 'document_id'),
+        stagingToken: requireString(firstStage, 'token'),
+        expectedDocumentRevision: 1,
+      );
+      final JsonMap secondStage = await client.stageAttachment(
+        bytes: _patternBytes(byteCount),
+        fileName: 'duplicate.bin',
+        mediaType: 'application/octet-stream',
+        contentLength: byteCount,
+      );
+      final JsonMap second = await client.attachStagedFile(
+        commandId: 'attach-second',
+        documentId: requireString(document, 'document_id'),
+        stagingToken: requireString(secondStage, 'token'),
+        expectedDocumentRevision: 1,
+      );
+
+      expect(first['sha256'], second['sha256']);
+      expect(
+        await client.listAttachments(
+          documentId: requireString(document, 'document_id'),
+        ),
+        hasLength(2),
+      );
+      await _expectPatternDownload(
+        await client.downloadAttachment(requireString(first, 'attachment_id')),
+        byteCount,
+      );
+      final List<File> contentFiles = await server.paths.attachments
+          .list(recursive: true, followLinks: false)
+          .where((FileSystemEntity entity) => entity is File)
+          .cast<File>()
+          .toList();
+      expect(contentFiles, hasLength(1));
+
+      await client.close();
+      await server.close();
+      server = await _startLocald(temporary);
+      client = await _clientFor(server);
+
+      expect(
+        await client.listAttachments(
+          documentId: requireString(document, 'document_id'),
+        ),
+        hasLength(2),
+      );
+      final JsonMap replay = await client.attachStagedFile(
+        commandId: 'attach-first',
+        documentId: requireString(document, 'document_id'),
+        stagingToken: requireString(firstStage, 'token'),
+        expectedDocumentRevision: 1,
+      );
+      expect(replay['was_replay'], isTrue);
+      await _expectPatternDownload(
+        await client.downloadAttachment(requireString(first, 'attachment_id')),
+        byteCount,
+      );
+
+      final JsonMap deleted = await client.deleteAttachment(
+        commandId: 'delete-first',
+        attachmentId: requireString(first, 'attachment_id'),
+        expectedRevision: 1,
+      );
+      expect(deleted['is_deleted'], isTrue);
+      expect(
+        await client.listAttachments(
+          documentId: requireString(document, 'document_id'),
+        ),
+        hasLength(1),
+      );
+      await expectLater(
+        client.downloadAttachment(requireString(first, 'attachment_id')),
+        throwsA(
+          isA<LocalApiException>().having(
+            (LocalApiException error) => error.code,
+            'code',
+            'AttachmentNotFound',
+          ),
+        ),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  for (final LocaldWriteStep step in LocaldWriteStep.values) {
+    test(
+      'startup repairs attachment interrupted at ${step.name}',
+      () async {
+        final Directory temporary = await _temporaryProfile(
+          'attachment-recovery-${step.name}',
+        );
+        addTearDown(() => _deleteProfile(temporary));
+        final _FailLocaldOnce injector = _FailLocaldOnce(step);
+        LocaldServer server = await _startLocald(
+          temporary,
+          faultInjector: injector.call,
+        );
+        HttpLocalApiClient client = await _clientFor(server);
+        addTearDown(() async {
+          await client.close();
+          await server.close();
+        });
+        final JsonMap workspace = await client.createWorkspace(
+          commandId: 'workspace',
+          name: 'Recovery',
+        );
+        final JsonMap document = await client.createDocument(
+          commandId: 'document',
+          workspaceId: requireString(workspace, 'workspace_id'),
+          title: 'Interrupted attachment',
+        );
+        final JsonMap staged = await client.stageAttachment(
+          bytes: Stream<List<int>>.value(utf8.encode('recover offline bytes')),
+          fileName: 'recovery.txt',
+          mediaType: 'text/plain',
+          contentLength: utf8.encode('recover offline bytes').length,
+        );
+
+        await expectLater(
+          client.attachStagedFile(
+            commandId: 'attach',
+            documentId: requireString(document, 'document_id'),
+            stagingToken: requireString(staged, 'token'),
+          ),
+          throwsA(
+            isA<LocalApiException>().having(
+              (LocalApiException error) => error.code,
+              'code',
+              'Internal',
+            ),
+          ),
+        );
+        expect(
+          await client.listAttachments(
+            documentId: requireString(document, 'document_id'),
+          ),
+          isEmpty,
+        );
+        await client.close();
+        await server.close();
+
+        server = await _startLocald(temporary);
+        client = await _clientFor(server);
+        final List<JsonMap> repaired = await client.listAttachments(
+          documentId: requireString(document, 'document_id'),
+        );
+
+        expect(repaired, hasLength(1));
+        final AttachmentDownload download = await client.downloadAttachment(
+          requireString(repaired.single, 'attachment_id'),
+        );
+        expect(
+          utf8.decode(
+            await download.bytes.expand((List<int> chunk) => chunk).toList(),
+          ),
+          'recover offline bytes',
+        );
+        final JsonMap replay = await client.attachStagedFile(
+          commandId: 'attach',
+          documentId: requireString(document, 'document_id'),
+          stagingToken: requireString(staged, 'token'),
+        );
+        expect(replay['was_replay'], isTrue);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
+}
+
+Future<Directory> _temporaryProfile(String suffix) async {
+  final Directory directory = Directory(
+    '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+    '${Platform.pathSeparator}test_profiles${Platform.pathSeparator}'
+    '$suffix-${DateTime.now().microsecondsSinceEpoch}',
+  );
+  await directory.create(recursive: true);
+  return directory;
+}
+
+Future<void> _deleteProfile(Directory directory) async {
+  if (await directory.exists()) {
+    await directory.delete(recursive: true);
+  }
+}
+
+Future<LocaldServer> _startLocald(
+  Directory profile, {
+  LocaldFaultInjector? faultInjector,
+}) => LocaldServer.start(
+  profileRoot: profile.path,
+  nativeLibraryPath:
+      '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+      '${Platform.pathSeparator}isar${Platform.pathSeparator}isar.dll',
+  allowDevelopmentIsarDownload: true,
+  faultInjector: faultInjector,
+);
+
+Future<HttpLocalApiClient> _clientFor(LocaldServer server) async {
+  final EndpointManifest endpoint = (await server.paths.readEndpoint())!;
+  final HttpLocalApiClient client = HttpLocalApiClient(endpoint: endpoint);
+  await client.handshake(
+    clientType: LocalClientType.integration,
+    profileId: 'default',
+  );
+  return client;
+}
+
+Stream<List<int>> _patternBytes(int total) async* {
+  const int chunkSize = 64 * 1024;
+  for (int offset = 0; offset < total; offset += chunkSize) {
+    final int length = (total - offset).clamp(0, chunkSize);
+    yield List<int>.generate(
+      length,
+      (int index) => (offset + index) % 251,
+      growable: false,
+    );
+  }
+}
+
+Future<void> _expectPatternDownload(
+  AttachmentDownload download,
+  int expectedSize,
+) async {
+  int offset = 0;
+  await for (final List<int> chunk in download.bytes) {
+    for (int index = 0; index < chunk.length; index++) {
+      if (chunk[index] != (offset + index) % 251) {
+        fail('Attachment content differs at byte ${offset + index}.');
+      }
+    }
+    offset += chunk.length;
+  }
+  expect(download.size, expectedSize);
+  expect(offset, expectedSize);
+}
+
+final class _FailLocaldOnce {
+  _FailLocaldOnce(this.step);
+
+  final LocaldWriteStep step;
+  bool _armed = true;
+
+  void call(LocaldWriteStep candidate) {
+    if (_armed && candidate == step) {
+      _armed = false;
+      throw StateError('Injected locald failure at ${step.name}.');
+    }
+  }
 }
 
 Future<int> _unauthenticatedStatus(EndpointManifest endpoint) async {

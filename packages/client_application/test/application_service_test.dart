@@ -364,6 +364,104 @@ void main() {
       expect(repaired.documentCount, 1);
     },
   );
+
+  test(
+    'attachment metadata stays hidden until commit marker is completed',
+    () async {
+      final CommandReceipt workspace = await service.createWorkspace(
+        commandId: 'workspace',
+        name: 'Personal',
+      );
+      final String workspaceId = workspace.result['workspace_id']! as String;
+      final CommandReceipt document = await service.createDocument(
+        commandId: 'document',
+        workspaceId: workspaceId,
+        title: 'With file',
+      );
+      final String documentId = document.result['document_id']! as String;
+      const StagedAttachmentDraft staged = StagedAttachmentDraft(
+        stagingToken: 'abcdefghijklmnopqrstuvwx',
+        fileName: ' notes.txt ',
+        mediaType: 'Text/Plain',
+        sha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        size: 12,
+      );
+
+      final CommandReceipt attached = await service.attachStagedFile(
+        commandId: 'attach',
+        documentId: documentId,
+        staged: staged,
+        expectedDocumentRevision: 1,
+      );
+      final String attachmentId = attached.result['attachment_id']! as String;
+      final AttachmentCommitMarker marker =
+          (await service.pendingAttachmentCommits()).single;
+
+      expect(await service.listAttachments(documentId), isEmpty);
+      expect(marker.attachmentId, attachmentId);
+      expect(attached.result['file_name'], 'notes.txt');
+      expect(attached.result['media_type'], 'text/plain');
+      await service.completeAttachmentCommit(marker);
+
+      expect(await service.listAttachments(documentId), hasLength(1));
+      expect((await service.getAttachment(attachmentId)).size, 12);
+      expect(
+        (await service.attachStagedFile(
+          commandId: 'attach',
+          documentId: documentId,
+          staged: staged,
+          expectedDocumentRevision: 1,
+        )).wasReplay,
+        isTrue,
+      );
+
+      final CommandReceipt deleted = await service.deleteAttachment(
+        commandId: 'delete-attachment',
+        attachmentId: attachmentId,
+        expectedRevision: 1,
+      );
+      expect(deleted.result['is_deleted'], isTrue);
+      expect(await service.listAttachments(documentId), isEmpty);
+      expect(
+        await service.listAttachments(documentId, includeDeleted: true),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('attachment marker and metadata roll back with command failure', () async {
+    final CommandReceipt workspace = await service.createWorkspace(
+      commandId: 'workspace',
+      name: 'Personal',
+    );
+    final CommandReceipt document = await service.createDocument(
+      commandId: 'document',
+      workspaceId: workspace.result['workspace_id']! as String,
+      title: 'With file',
+    );
+    store.failAfterAttachmentMarker = true;
+
+    await expectLater(
+      service.attachStagedFile(
+        commandId: 'attach',
+        documentId: document.result['document_id']! as String,
+        staged: const StagedAttachmentDraft(
+          stagingToken: 'abcdefghijklmnopqrstuvwx',
+          fileName: 'notes.txt',
+          mediaType: 'text/plain',
+          sha256:
+              '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          size: 12,
+        ),
+      ),
+      throwsStateError,
+    );
+
+    expect(store.attachments, isEmpty);
+    expect(store.attachmentMarkers, isEmpty);
+    expect(store.outcomes.containsKey('attach'), isFalse);
+  });
 }
 
 final class _FixedClock implements Clock {
@@ -387,12 +485,16 @@ final class _SequentialIds implements IdGenerator {
 final class _MemoryStore implements ClientStore {
   Map<String, Workspace> workspaces = <String, Workspace>{};
   Map<String, Document> documents = <String, Document>{};
+  Map<String, Attachment> attachments = <String, Attachment>{};
+  Map<String, AttachmentCommitMarker> attachmentMarkers =
+      <String, AttachmentCommitMarker>{};
   Map<String, CommandOutcome> outcomes = <String, CommandOutcome>{};
   List<Operation> operations = <Operation>[];
   Map<String, SearchProjection> searchProjections =
       <String, SearchProjection>{};
   int sequence = 0;
   int searchIndexedSequence = 0;
+  bool failAfterAttachmentMarker = false;
 
   @override
   Future<T> read<T>(
@@ -409,6 +511,8 @@ final class _MemoryStore implements ClientStore {
     } on Object {
       workspaces = snapshot.workspaces;
       documents = snapshot.documents;
+      attachments = snapshot.attachments;
+      attachmentMarkers = snapshot.attachmentMarkers;
       outcomes = snapshot.outcomes;
       operations = snapshot.operations;
       searchProjections = snapshot.searchProjections;
@@ -421,11 +525,16 @@ final class _MemoryStore implements ClientStore {
   _MemoryStore _copy() => _MemoryStore()
     ..workspaces = Map<String, Workspace>.of(workspaces)
     ..documents = Map<String, Document>.of(documents)
+    ..attachments = Map<String, Attachment>.of(attachments)
+    ..attachmentMarkers = Map<String, AttachmentCommitMarker>.of(
+      attachmentMarkers,
+    )
     ..outcomes = Map<String, CommandOutcome>.of(outcomes)
     ..operations = List<Operation>.of(operations)
     ..searchProjections = Map<String, SearchProjection>.of(searchProjections)
     ..sequence = sequence
-    ..searchIndexedSequence = searchIndexedSequence;
+    ..searchIndexedSequence = searchIndexedSequence
+    ..failAfterAttachmentMarker = failAfterAttachmentMarker;
 }
 
 final class _MemoryTransaction implements ClientStoreWriter {
@@ -437,6 +546,19 @@ final class _MemoryTransaction implements ClientStoreWriter {
   Future<void> appendOperation(Operation operation) async {
     store.operations.add(operation);
   }
+
+  @override
+  Future<Attachment?> getAttachment(String attachmentId) async =>
+      store.attachments[attachmentId];
+
+  @override
+  Future<AttachmentCommitMarker?> getAttachmentCommitMarker(
+    String attachmentId,
+  ) async => store.attachmentMarkers[attachmentId];
+
+  @override
+  Future<List<AttachmentCommitMarker>> listPendingAttachmentCommits() async =>
+      store.attachmentMarkers.values.toList();
 
   @override
   Future<CommandOutcome?> getCommandOutcome(String commandId) async =>
@@ -462,6 +584,18 @@ final class _MemoryTransaction implements ClientStoreWriter {
         (Document document) =>
             document.workspaceId == workspaceId &&
             (includeDeleted || !document.isDeleted),
+      )
+      .toList();
+
+  @override
+  Future<List<Attachment>> listAttachments(
+    String documentId, {
+    bool includeDeleted = false,
+  }) async => store.attachments.values
+      .where(
+        (Attachment attachment) =>
+            attachment.documentId == documentId &&
+            (includeDeleted || !attachment.isDeleted),
       )
       .toList();
 
@@ -493,6 +627,20 @@ final class _MemoryTransaction implements ClientStoreWriter {
   }
 
   @override
+  Future<void> putAttachment(Attachment attachment) async {
+    store.attachments[attachment.id] = attachment;
+  }
+
+  @override
+  Future<void> putAttachmentCommitMarker(AttachmentCommitMarker marker) async {
+    store.attachmentMarkers[marker.attachmentId] = marker;
+    if (store.failAfterAttachmentMarker) {
+      store.failAfterAttachmentMarker = false;
+      throw StateError('Injected attachment marker failure.');
+    }
+  }
+
+  @override
   Future<void> putDocument(Document document) async {
     store.documents[document.id] = document;
   }
@@ -510,6 +658,11 @@ final class _MemoryTransaction implements ClientStoreWriter {
   @override
   Future<void> removeSearchProjection(String documentId) async {
     store.searchProjections.remove(documentId);
+  }
+
+  @override
+  Future<void> removeAttachmentCommitMarker(String attachmentId) async {
+    store.attachmentMarkers.remove(attachmentId);
   }
 
   @override

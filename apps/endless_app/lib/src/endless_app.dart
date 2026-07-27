@@ -938,6 +938,101 @@ final class _DocumentEditorState extends State<DocumentEditor> {
             ),
           ),
         ),
+        const Divider(height: 1),
+        _AttachmentsPanel(
+          controller: widget.controller,
+          readOnly: widget.readOnly,
+        ),
+      ],
+    ),
+  );
+}
+
+final class _AttachmentsPanel extends StatelessWidget {
+  const _AttachmentsPanel({required this.controller, required this.readOnly});
+
+  final AppController controller;
+  final bool readOnly;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Text('Вложения', style: Theme.of(context).textTheme.titleSmall),
+            const Spacer(),
+            IconButton(
+              tooltip: 'Добавить вложение',
+              onPressed: readOnly
+                  ? null
+                  : () => _addAttachment(context, controller),
+              icon: const Icon(Icons.attach_file),
+            ),
+          ],
+        ),
+        if (controller.attachments.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text('Нет вложений'),
+          )
+        else
+          SizedBox(
+            height: 82,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: controller.attachments.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (BuildContext context, int index) {
+                final JsonMap attachment = controller.attachments[index];
+                return SizedBox(
+                  width: 280,
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.insert_drive_file_outlined),
+                      title: Text(
+                        requireString(attachment, 'file_name'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        _formatBytes(requireInt(attachment, 'size')),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          IconButton(
+                            tooltip: 'Сохранить вложение',
+                            onPressed: () => _downloadAttachment(
+                              context,
+                              controller,
+                              attachment,
+                            ),
+                            icon: const Icon(Icons.download_outlined),
+                          ),
+                          if (!readOnly)
+                            IconButton(
+                              tooltip: 'Удалить вложение',
+                              onPressed: () => _deleteAttachment(
+                                context,
+                                controller,
+                                attachment,
+                              ),
+                              icon: const Icon(Icons.close),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
       ],
     ),
   );
@@ -1156,6 +1251,81 @@ Future<void> _deleteDocument(
   }
 }
 
+Future<void> _addAttachment(
+  BuildContext context,
+  AppController controller,
+) async {
+  final String? sourcePath = await _askText(
+    context,
+    title: 'Добавить вложение',
+    hint: 'Полный путь к локальному файлу',
+    confirmLabel: 'Добавить',
+  );
+  if (sourcePath != null && sourcePath.trim().isNotEmpty && context.mounted) {
+    await _runUiActionAsync(
+      context,
+      () => controller.addAttachmentFromPath(
+        sourcePath,
+        mediaType: _mediaTypeForPath(sourcePath),
+      ),
+    );
+  }
+}
+
+Future<void> _downloadAttachment(
+  BuildContext context,
+  AppController controller,
+  JsonMap attachment,
+) async {
+  final String? targetPath = await _askText(
+    context,
+    title: 'Сохранить вложение',
+    hint: requireString(attachment, 'file_name'),
+    confirmLabel: 'Сохранить',
+  );
+  if (targetPath != null && targetPath.trim().isNotEmpty && context.mounted) {
+    await _runUiActionAsync(
+      context,
+      () => controller.downloadAttachmentToPath(
+        requireString(attachment, 'attachment_id'),
+        targetPath,
+      ),
+    );
+  }
+}
+
+Future<void> _deleteAttachment(
+  BuildContext context,
+  AppController controller,
+  JsonMap attachment,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: const Text('Удалить вложение?'),
+      content: Text(requireString(attachment, 'file_name')),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Удалить'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) {
+    await _runUiActionAsync(
+      context,
+      () => controller.deleteAttachment(
+        requireString(attachment, 'attachment_id'),
+      ),
+    );
+  }
+}
+
 void _runUiAction(BuildContext context, Future<void> Function() action) {
   unawaited(_runUiActionAsync(context, action));
 }
@@ -1187,6 +1357,7 @@ Future<String?> _askText(
   BuildContext context, {
   required String title,
   required String hint,
+  String confirmLabel = 'Создать',
 }) async {
   String value = '';
   return showDialog<String>(
@@ -1206,9 +1377,36 @@ Future<String?> _askText(
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, value),
-          child: const Text('Создать'),
+          child: Text(confirmLabel),
         ),
       ],
     ),
   );
+}
+
+String _formatBytes(int bytes) {
+  if (bytes < 1024) {
+    return '$bytes Б';
+  }
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1)} КБ';
+  }
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ';
+}
+
+String _mediaTypeForPath(String path) {
+  final String normalized = path.toLowerCase();
+  if (normalized.endsWith('.txt') || normalized.endsWith('.md')) {
+    return 'text/plain';
+  }
+  if (normalized.endsWith('.png')) {
+    return 'image/png';
+  }
+  if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (normalized.endsWith('.pdf')) {
+    return 'application/pdf';
+  }
+  return 'application/octet-stream';
 }

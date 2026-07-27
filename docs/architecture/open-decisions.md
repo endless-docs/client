@@ -191,11 +191,18 @@ Implementation evidence collected:
 - the Windows test corpus rejects traversal, overlapping roots, a real
   symbolic-link content prefix, staged/committed tampering and malformed
   journals.
+- authoritative attachment metadata, recovery marker, Operation Log, command
+  outcome and event sequence commit in one real Isar transaction; schema-v2 is
+  retained as the pre-attachment upgrade fixture;
+- process tests interrupt orchestration after metadata commit and after content
+  commit; cold startup completes both states before readiness;
+- the typed Local API streams a payload larger than the JSON request limit,
+  deduplicates equal content, downloads it after cold reopen, and is exercised
+  by Flutter widget, CLI and packaged-smoke flows.
 
 This evidence supports option 1 as the current implementation baseline, but D7
-remains open until authoritative attachment metadata, command atomicity,
-backup/export behavior and representative size/performance evidence are
-implemented.
+remains open until attachment-aware backup/export, safe unreferenced-content GC
+and representative size/performance evidence are implemented.
 
 ## D8 — MCP pairing and approval
 

@@ -162,6 +162,62 @@ final class Block {
   };
 }
 
+final class Attachment {
+  const Attachment({
+    required this.id,
+    required this.workspaceId,
+    required this.documentId,
+    required this.fileName,
+    required this.mediaType,
+    required this.sha256,
+    required this.size,
+    required this.revision,
+    required this.isDeleted,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  final String id;
+  final String workspaceId;
+  final String documentId;
+  final String fileName;
+  final String mediaType;
+  final String sha256;
+  final int size;
+  final int revision;
+  final bool isDeleted;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  Attachment markDeleted(DateTime now) => Attachment(
+    id: id,
+    workspaceId: workspaceId,
+    documentId: documentId,
+    fileName: fileName,
+    mediaType: mediaType,
+    sha256: sha256,
+    size: size,
+    revision: revision + 1,
+    isDeleted: true,
+    createdAt: createdAt,
+    updatedAt: now,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'attachment_id': id,
+    'workspace_id': workspaceId,
+    'document_id': documentId,
+    'file_name': fileName,
+    'media_type': mediaType,
+    'sha256': sha256,
+    'size': size,
+    'revision': revision,
+    'is_deleted': isDeleted,
+    'created_at': createdAt.toUtc().toIso8601String(),
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+  };
+}
+
 final class CommandOutcome {
   const CommandOutcome({
     required this.commandId,

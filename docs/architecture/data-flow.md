@@ -63,9 +63,18 @@ Query handler не возвращает Isar records или filesystem paths.
 
 1. Stream попадает в staging через Local API.
 2. `locald` проверяет size/type policy и hash.
-3. Metadata command проходит domain rules.
-4. Journal связывает Isar metadata и filesystem move.
-5. Crash recovery приводит состояние к `committed` или удаляет abandoned staging.
+3. Metadata command в одной Isar transaction сохраняет `Attachment`, recovery
+   marker, Operation, command outcome и event sequence.
+4. Adapter атомарно публикует hash-addressed content.
+5. После повторной проверки SHA-256/size application удаляет recovery marker и
+   только затем `locald` отвечает success.
+6. Pending metadata не выдаётся queries. При restart `locald` завершает каждый
+   authoritative marker до публикации readiness; abandoned staging очищается
+   отдельно.
+
+Retry после неизвестного outcome использует тот же `command_id`/staging token.
+После завершения token journal удаляется, а поздний replay проверяет сохранённый
+command fingerprint и hash-addressed bytes.
 
 ## Search update
 

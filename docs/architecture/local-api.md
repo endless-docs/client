@@ -88,6 +88,18 @@ Semantic envelope:
 `StageAttachment`, `CommitAttachment`, `OpenAttachment`, `LinkAttachment`,
 `UnlinkAttachment`, `DeleteAttachment`.
 
+Текущий typed adapter реализует этот semantic flow как:
+
+- binary `POST /v1/attachments/stage` с bounded body, display name и media type;
+- idempotent command `AttachStagedFile`, который связывает opaque staging token
+  с document;
+- queries `ListAttachments`/`GetAttachment`;
+- authenticated streaming content response;
+- command `DeleteAttachment`.
+
+Общий JSON request limit и 100 MiB attachment stream limit независимы. Session
+proof обязателен для metadata и bytes; caller filesystem paths не передаются.
+
 ### Portability
 
 `ValidateImport`, `ExecuteImport`, `CreateExport`, `RestoreBackup`.

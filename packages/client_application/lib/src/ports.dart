@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:client_domain/client_domain.dart';
 
+import 'attachments.dart';
 import 'search.dart';
 
 abstract interface class Clock {
@@ -30,6 +31,19 @@ abstract interface class ClientStoreReader {
     bool includeDeleted = false,
   });
 
+  Future<Attachment?> getAttachment(String attachmentId);
+
+  Future<List<Attachment>> listAttachments(
+    String documentId, {
+    bool includeDeleted = false,
+  });
+
+  Future<AttachmentCommitMarker?> getAttachmentCommitMarker(
+    String attachmentId,
+  );
+
+  Future<List<AttachmentCommitMarker>> listPendingAttachmentCommits();
+
   Future<CommandOutcome?> getCommandOutcome(String commandId);
 
   Future<List<SearchHit>> searchDocuments(
@@ -47,6 +61,12 @@ abstract interface class ClientStoreWriter implements ClientStoreReader {
   Future<void> putWorkspace(Workspace workspace);
 
   Future<void> putDocument(Document document);
+
+  Future<void> putAttachment(Attachment attachment);
+
+  Future<void> putAttachmentCommitMarker(AttachmentCommitMarker marker);
+
+  Future<void> removeAttachmentCommitMarker(String attachmentId);
 
   Future<void> putSearchProjection(SearchProjection projection);
 

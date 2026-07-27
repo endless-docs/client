@@ -1,6 +1,6 @@
 import 'package:isar_community/isar.dart';
 
-part 'records.g.dart';
+part 'schema_v2.g.dart';
 
 @collection
 class WorkspaceRecord {
@@ -100,44 +100,6 @@ class SearchProjectionRecord {
   late String content;
   late String normalizedText;
   late int revision;
-}
-
-@collection
-class AttachmentRecord {
-  Id id = Isar.autoIncrement;
-
-  @Index(unique: true)
-  late String attachmentId;
-
-  @Index()
-  late String workspaceId;
-
-  @Index()
-  late String documentId;
-
-  @Index()
-  late String sha256;
-
-  late String fileName;
-  late String mediaType;
-  late int size;
-  late int revision;
-  late bool isDeleted;
-  late DateTime createdAt;
-  late DateTime updatedAt;
-}
-
-@collection
-class AttachmentCommitRecord {
-  Id id = Isar.autoIncrement;
-
-  @Index(unique: true)
-  late String attachmentId;
-
-  late String stagingToken;
-  late String sha256;
-  late int size;
-  late DateTime createdAt;
 }
 
 @collection

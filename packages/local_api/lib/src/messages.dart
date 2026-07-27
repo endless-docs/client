@@ -3,6 +3,7 @@ typedef JsonMap = Map<String, Object?>;
 const String localApiVersion = '1.0';
 const String componentVersion = '0.1.0';
 const int maximumRequestBytes = 2 * 1024 * 1024;
+const int maximumAttachmentBytes = 100 * 1024 * 1024;
 
 enum LocalClientType { flutterUi, mcpServer, cli, integration }
 

@@ -12,6 +12,7 @@ dependencies:
   client_application: any
   client_domain: any
   local_api: any
+  local_attachments: any
   persistence_isar: any
   platform_runtime: any
 

@@ -12,6 +12,8 @@ final class ProfilePaths {
   Directory get database => Directory(_join(root.path, 'database'));
   Directory get attachments => Directory(_join(root.path, 'attachments'));
   Directory get staging => Directory(_join(root.path, 'staging'));
+  Directory get attachmentStaging =>
+      Directory(_join(staging.path, 'attachments'));
   Directory get backups => Directory(_join(root.path, 'backups'));
   Directory get logs => Directory(_join(root.path, 'logs'));
   Directory get runtime => Directory(_join(root.path, 'runtime'));
@@ -67,6 +69,7 @@ final class ProfilePaths {
       database,
       attachments,
       staging,
+      attachmentStaging,
       backups,
       logs,
       runtime,

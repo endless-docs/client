@@ -20,3 +20,14 @@ endless workspace archive WORKSPACE_ID
 endless workspace restore WORKSPACE_ID
 endless workspace delete WORKSPACE_ID
 ```
+
+Attachment bytes are streamed through `locald` and stored by SHA-256; caller
+paths are never persisted:
+
+```text
+endless attachment add DOCUMENT_ID FILE [MEDIA_TYPE]
+endless attachment list DOCUMENT_ID
+endless attachment get ATTACHMENT_ID
+endless attachment delete ATTACHMENT_ID
+endless attachment download ATTACHMENT_ID OUTPUT_PATH
+```

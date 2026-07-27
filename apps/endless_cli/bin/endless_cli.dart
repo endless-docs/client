@@ -152,6 +152,95 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
       expectedRevision: requireInt(document, 'revision'),
     );
   }
+  if ((command.length == 4 || command.length == 5) &&
+      command[0] == 'attachment' &&
+      command[1] == 'add') {
+    final File source = File(command[3]).absolute;
+    if (!await source.exists()) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Attachment source file does not exist.',
+        retryable: false,
+      );
+    }
+    final int size = await source.length();
+    final JsonMap document = await client.getDocument(command[2]);
+    final JsonMap staged = await client.stageAttachment(
+      bytes: source.openRead(),
+      fileName: _baseName(source.path),
+      mediaType: command.length == 5 ? command[4] : 'application/octet-stream',
+      contentLength: size,
+    );
+    return client.attachStagedFile(
+      commandId: _commandId(),
+      documentId: command[2],
+      stagingToken: requireString(staged, 'token'),
+      expectedDocumentRevision: requireInt(document, 'revision'),
+    );
+  }
+  if (command.length == 3 &&
+      command[0] == 'attachment' &&
+      command[1] == 'list') {
+    return client.listAttachments(documentId: command[2]);
+  }
+  if (command.length == 3 &&
+      command[0] == 'attachment' &&
+      command[1] == 'get') {
+    return client.getAttachment(command[2]);
+  }
+  if (command.length == 3 &&
+      command[0] == 'attachment' &&
+      command[1] == 'delete') {
+    final JsonMap attachment = await client.getAttachment(command[2]);
+    return client.deleteAttachment(
+      commandId: _commandId(),
+      attachmentId: command[2],
+      expectedRevision: requireInt(attachment, 'revision'),
+    );
+  }
+  if (command.length == 4 &&
+      command[0] == 'attachment' &&
+      command[1] == 'download') {
+    final File target = File(command[3]).absolute;
+    if (await target.exists()) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Attachment download target already exists.',
+        retryable: false,
+      );
+    }
+    final AttachmentDownload download = await client.downloadAttachment(
+      command[2],
+    );
+    final IOSink output = target.openWrite(mode: FileMode.writeOnly);
+    bool closed = false;
+    try {
+      await output.addStream(download.bytes);
+      await output.flush();
+      await output.close();
+      closed = true;
+    } on Object {
+      if (!closed) {
+        try {
+          await output.close();
+        } on Object {
+          // Preserve the transfer failure; the partial target is removed below.
+        }
+      }
+      if (await target.exists()) {
+        await target.delete();
+      }
+      rethrow;
+    }
+    return <String, Object?>{
+      'attachment_id': download.attachmentId,
+      'file_name': download.fileName,
+      'media_type': download.mediaType,
+      'sha256': download.sha256,
+      'size': download.size,
+      'output_path': target.path,
+    };
+  }
   if (command.length >= 3 && command[0] == 'search') {
     return client.searchDocuments(
       workspaceId: command[1],
@@ -188,7 +277,8 @@ String _humanReadable(Object value) {
     return value
         .map(
           (JsonMap item) =>
-              '${item['workspace_id'] ?? item['document_id']}\t${item['name'] ?? item['title']}',
+              '${item['attachment_id'] ?? item['document_id'] ?? item['workspace_id']}'
+              '\t${item['file_name'] ?? item['title'] ?? item['name']}',
         )
         .join('\n');
   }
@@ -201,11 +291,13 @@ String _humanReadable(Object value) {
 int _exitCode(String errorCode) => switch (errorCode) {
   'InvalidArgument' => 2,
   'Unauthenticated' || 'ScopeDenied' => 77,
-  'WorkspaceNotFound' || 'DocumentNotFound' => 66,
+  'WorkspaceNotFound' || 'DocumentNotFound' || 'AttachmentNotFound' => 66,
   'RevisionConflict' || 'CommandIdReused' => 75,
   'LocaldUnavailable' || 'LocaldStarting' => 69,
   _ => 70,
 };
+
+String _baseName(String path) => path.split(RegExp(r'[\\/]')).last;
 
 final class _CliArguments {
   const _CliArguments({
@@ -274,6 +366,11 @@ Usage:
   endless [options] document move DOCUMENT_ID PARENT_ID|root
   endless [options] document delete DOCUMENT_ID
   endless [options] document restore DOCUMENT_ID
+  endless [options] attachment add DOCUMENT_ID FILE [MEDIA_TYPE]
+  endless [options] attachment list DOCUMENT_ID
+  endless [options] attachment get ATTACHMENT_ID
+  endless [options] attachment delete ATTACHMENT_ID
+  endless [options] attachment download ATTACHMENT_ID OUTPUT_PATH
   endless [options] search WORKSPACE_ID QUERY
   endless [options] search-index status
   endless [options] search-index rebuild

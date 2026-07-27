@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:endless_app/src/app_controller.dart';
@@ -238,6 +239,69 @@ void main() {
     expect(find.text('Создайте локальное пространство'), findsOneWidget);
   });
 
+  testWidgets('adds, downloads, and deletes a managed attachment', (
+    WidgetTester tester,
+  ) async {
+    late Directory temporary;
+    late File source;
+    late File downloaded;
+    await tester.runAsync(() async {
+      temporary = await Directory(
+        '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+        '${Platform.pathSeparator}test_profiles${Platform.pathSeparator}'
+        'widget-attachment-${DateTime.now().microsecondsSinceEpoch}',
+      ).create(recursive: true);
+      source = File('${temporary.path}${Platform.pathSeparator}offline.txt');
+      downloaded = File(
+        '${temporary.path}${Platform.pathSeparator}downloaded.txt',
+      );
+      await source.writeAsString('available without a server', flush: true);
+    });
+    addTearDown(() async {
+      if (await temporary.exists()) {
+        await temporary.delete(recursive: true);
+      }
+    });
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('С файлами');
+
+    await tester.runAsync(
+      () => controller.addAttachmentFromPath(
+        source.path,
+        mediaType: 'text/plain',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.attachments, hasLength(1));
+    expect(find.text('offline.txt'), findsOneWidget);
+    expect(find.byTooltip('Сохранить вложение'), findsOneWidget);
+    final String attachmentId = requireString(
+      controller.attachments.single,
+      'attachment_id',
+    );
+    await tester.runAsync(
+      () => controller.downloadAttachmentToPath(attachmentId, downloaded.path),
+    );
+    expect(
+      await tester.runAsync(downloaded.readAsString),
+      'available without a server',
+    );
+
+    await tester.tap(find.byTooltip('Удалить вложение'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+    await tester.pumpAndSettle();
+
+    expect(controller.attachments, isEmpty);
+    expect(find.text('Нет вложений'), findsOneWidget);
+  });
+
   testWidgets('shows a recoverable startup error', (WidgetTester tester) async {
     final AppController controller = AppController(
       bootstrap: () async => throw const LocalApiException(
@@ -261,6 +325,9 @@ void main() {
 final class _FakeLocalApi implements EndlessLocalApi {
   final List<JsonMap> _workspaces = <JsonMap>[];
   final List<JsonMap> _documents = <JsonMap>[];
+  final List<JsonMap> _attachments = <JsonMap>[];
+  final Map<String, List<int>> _attachmentBytes = <String, List<int>>{};
+  final Map<String, JsonMap> _stagedAttachments = <String, JsonMap>{};
   final Map<String, String> savedTextByDocument = <String, String>{};
   final List<String> saveCommandIds = <String>[];
   bool failNextSave = false;
@@ -543,6 +610,109 @@ final class _FakeLocalApi implements EndlessLocalApi {
     };
     _documents[index] = restored;
     return restored;
+  }
+
+  @override
+  Future<JsonMap> stageAttachment({
+    required Stream<List<int>> bytes,
+    required String fileName,
+    required String mediaType,
+    int? contentLength,
+  }) async {
+    final List<int> collected = await bytes
+        .expand((List<int> chunk) => chunk)
+        .toList();
+    final String token = 'staging-token-${_stagedAttachments.length + 1}-xxxx';
+    final JsonMap staged = <String, Object?>{
+      'token': token,
+      'file_name': fileName,
+      'media_type': mediaType,
+      'sha256':
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      'size': collected.length,
+      'bytes': collected,
+    };
+    _stagedAttachments[token] = staged;
+    return staged;
+  }
+
+  @override
+  Future<JsonMap> attachStagedFile({
+    required String commandId,
+    required String documentId,
+    required String stagingToken,
+    int? expectedDocumentRevision,
+  }) async {
+    final JsonMap staged = _stagedAttachments[stagingToken]!;
+    final String id = 'attachment-${_attachments.length + 1}';
+    final JsonMap document = await getDocument(documentId);
+    final JsonMap attachment = <String, Object?>{
+      'attachment_id': id,
+      'workspace_id': document['workspace_id'],
+      'document_id': documentId,
+      'file_name': staged['file_name'],
+      'media_type': staged['media_type'],
+      'sha256': staged['sha256'],
+      'size': staged['size'],
+      'revision': 1,
+      'is_deleted': false,
+      'created_at': '2026-01-01T00:00:00Z',
+      'updated_at': '2026-01-01T00:00:00Z',
+    };
+    _attachments.add(attachment);
+    _attachmentBytes[id] = List<int>.of(staged['bytes']! as List<int>);
+    return attachment;
+  }
+
+  @override
+  Future<List<JsonMap>> listAttachments({
+    required String documentId,
+    bool includeDeleted = false,
+  }) async => _attachments
+      .where(
+        (JsonMap attachment) =>
+            attachment['document_id'] == documentId &&
+            (includeDeleted || attachment['is_deleted'] != true),
+      )
+      .map(Map<String, Object?>.of)
+      .toList();
+
+  @override
+  Future<JsonMap> getAttachment(String attachmentId) async =>
+      _attachments.firstWhere(
+        (JsonMap attachment) => attachment['attachment_id'] == attachmentId,
+      );
+
+  @override
+  Future<AttachmentDownload> downloadAttachment(String attachmentId) async {
+    final JsonMap attachment = await getAttachment(attachmentId);
+    final List<int> bytes = _attachmentBytes[attachmentId]!;
+    return AttachmentDownload(
+      attachmentId: attachmentId,
+      fileName: requireString(attachment, 'file_name'),
+      mediaType: requireString(attachment, 'media_type'),
+      sha256: requireString(attachment, 'sha256'),
+      size: bytes.length,
+      bytes: Stream<List<int>>.value(bytes),
+    );
+  }
+
+  @override
+  Future<JsonMap> deleteAttachment({
+    required String commandId,
+    required String attachmentId,
+    int? expectedRevision,
+  }) async {
+    final int index = _attachments.indexWhere(
+      (JsonMap attachment) => attachment['attachment_id'] == attachmentId,
+    );
+    final JsonMap deleted = <String, Object?>{
+      ..._attachments[index],
+      'is_deleted': true,
+      'revision': requireInt(_attachments[index], 'revision') + 1,
+    };
+    _attachments[index] = deleted;
+    return deleted;
   }
 
   @override

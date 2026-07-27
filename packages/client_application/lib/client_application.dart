@@ -2,5 +2,6 @@
 library;
 
 export 'src/application_service.dart';
+export 'src/attachments.dart';
 export 'src/ports.dart';
 export 'src/search.dart';

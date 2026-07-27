@@ -76,6 +76,29 @@ try {
         $workspace.workspace_id,
         'OfflineNote'
     )
+    $attachmentSource = Join-Path $smokeRoot 'offline-attachment.txt'
+    [System.IO.File]::WriteAllText(
+        $attachmentSource,
+        'Available without an external server',
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $attachment = Invoke-CliJson @(
+        'attachment',
+        'add',
+        $document.document_id,
+        $attachmentSource,
+        'text/plain'
+    )
+    $attachmentsBefore = @(
+        Invoke-CliJson @(
+            'attachment',
+            'list',
+            $document.document_id
+        )
+    )
+    if ($attachmentsBefore.Count -ne 1) {
+        throw 'Managed attachment was not listed after upload.'
+    }
     $child = Invoke-CliJson @(
         'document',
         'create',
@@ -146,6 +169,28 @@ try {
     if ($searchAfter.Count -ne 1) {
         throw 'Local search projection did not survive cold restart.'
     }
+    $attachmentsAfter = @(
+        Invoke-CliJson @(
+            'attachment',
+            'list',
+            $document.document_id
+        )
+    )
+    if ($attachmentsAfter.Count -ne 1 -or
+        $attachmentsAfter[0].attachment_id -ne $attachment.attachment_id) {
+        throw 'Managed attachment metadata did not survive cold restart.'
+    }
+    $attachmentDownload = Join-Path $smokeRoot 'downloaded-attachment.txt'
+    $null = Invoke-CliJson @(
+        'attachment',
+        'download',
+        $attachment.attachment_id,
+        $attachmentDownload
+    )
+    if ([System.IO.File]::ReadAllText($attachmentDownload) -ne
+        'Available without an external server') {
+        throw 'Managed attachment bytes did not round trip.'
+    }
     $searchStatus = Invoke-CliJson @('search-index', 'status')
     $rebuilt = Invoke-CliJson @('search-index', 'rebuild')
     if (-not $searchStatus.is_current -or -not $rebuilt.is_current) {
@@ -161,6 +206,7 @@ try {
         WorkspaceLifecycle = $true
         LocalSearch = $true
         SearchRebuild = $true
+        ManagedAttachments = $true
         ColdRestart = $true
         ExternalProxyBlocked = $true
         Profile = $smokeRoot

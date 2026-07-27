@@ -85,8 +85,10 @@ metadata:
   journal изолируется как recovery warning.
 
 Эти controls проверены adapter corpus, включая реальный Windows symlink.
-Полный trust-boundary gate остаётся открытым до подключения metadata commands и
-Local API authorization.
+Authenticated Local API integration дополнительно проверяет bounded stream,
+authoritative metadata marker, download after cold reopen и отсутствие
+caller-provided paths в persisted metadata. Attachment-aware backup/export,
+reference-safe GC и performance gate остаются открыты.
 
 ## Audit
 

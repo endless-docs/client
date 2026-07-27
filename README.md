@@ -18,14 +18,18 @@
   восстанавливаются и удаляются каскадно; запрос выхода flush-ит pending edit;
 - локальный поиск по заголовкам и содержимому обновляется атомарно с документами,
   сохраняется после cold restart и может быть перестроен без сети;
+- вложения загружаются потоково из Flutter UI/CLI, получают authoritative
+  metadata в Isar, хранятся по SHA-256 и восстанавливаются после прерывания
+  между database commit и filesystem move;
 - отдельный pure Dart process `locald` — единственный владелец Isar;
 - UI и CLI подключаются через authenticated Local API на `127.0.0.1`;
 - domain mutation, command outcome, Operation Log и event sequence фиксируются
   одной durable Isar transaction;
 - собранный Windows bundle включает `locald.exe` и `isar.dll`, поэтому runtime не
   скачивает компоненты и не требует внешнего сервера;
-- cold restart, search rebuild, duplicate `command_id`, unauthorized request,
-  architecture boundaries и Flutter states покрыты автоматическими тестами.
+- cold restart, search/attachment repair, duplicate `command_id`, unauthorized
+  request, architecture boundaries и Flutter states покрыты автоматическими
+  тестами.
 
 Полная матрица реализованного и ещё необходимого находится в
 [implementation status](docs/architecture/implementation-status.md).

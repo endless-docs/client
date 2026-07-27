@@ -8,6 +8,7 @@ import 'package:persistence_isar/persistence_isar.dart';
 import 'package:test/test.dart';
 
 import 'fixtures/schema_v1.dart' as v1;
+import 'fixtures/schema_v2.dart' as v2;
 
 void main() {
   test(
@@ -102,6 +103,12 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'schema v2 fixture opens with empty attachment collections',
+    _verifySchemaV2Migration,
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   for (final IsarWriteStep step in <IsarWriteStep>[
     IsarWriteStep.documentRecord,
     IsarWriteStep.blockDelete,
@@ -118,6 +125,27 @@ void main() {
       timeout: const Timeout(Duration(minutes: 2)),
     );
   }
+
+  for (final IsarWriteStep step in <IsarWriteStep>[
+    IsarWriteStep.attachmentRecord,
+    IsarWriteStep.attachmentCommitMarker,
+    IsarWriteStep.eventSequence,
+    IsarWriteStep.searchCheckpoint,
+    IsarWriteStep.operationRecord,
+    IsarWriteStep.commandOutcome,
+  ]) {
+    test(
+      'attachment command rolls back at ${step.name}',
+      () => _verifyAttachmentRollback(step),
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
+
+  test(
+    'attachment marker completion is durably retryable',
+    _verifyAttachmentCompletionRetry,
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
   test(
     'workspace record failure rolls back rename',
@@ -259,6 +287,229 @@ Future<void> _verifySchemaV1Migration() async {
     }
   }
 }
+
+Future<void> _verifySchemaV2Migration() async {
+  final Directory temporary = Directory(
+    '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+    '${Platform.pathSeparator}test_profiles${Platform.pathSeparator}'
+    'migration-v2-${DateTime.now().microsecondsSinceEpoch}',
+  );
+  final Directory bootstrap = Directory(
+    '${temporary.path}${Platform.pathSeparator}bootstrap',
+  );
+  final Directory profile = Directory(
+    '${temporary.path}${Platform.pathSeparator}profile',
+  );
+  await temporary.create(recursive: true);
+  await profile.create(recursive: true);
+  IsarClientStore? currentStore;
+  try {
+    final IsarClientStore bootstrapStore = await IsarClientStore.open(
+      directory: bootstrap.path,
+      nativeLibraryPath:
+          '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+          '${Platform.pathSeparator}isar${Platform.pathSeparator}isar.dll',
+      allowDevelopmentDownload: true,
+      instanceName: 'migration-v2-bootstrap',
+    );
+    await bootstrapStore.close();
+
+    final Isar legacy = await Isar.open(
+      <CollectionSchema<Object>>[
+        v2.WorkspaceRecordSchema,
+        v2.DocumentRecordSchema,
+        v2.BlockRecordSchema,
+        v2.CommandOutcomeRecordSchema,
+        v2.OperationRecordSchema,
+        v2.SearchProjectionRecordSchema,
+        v2.RuntimeStateRecordSchema,
+      ],
+      directory: profile.path,
+      name: 'migration-v2-fixture',
+      relaxedDurability: false,
+      inspector: false,
+    );
+    final DateTime createdAt = DateTime.utc(2026, 1, 1);
+    await legacy.writeTxn(() async {
+      await legacy.collection<v2.WorkspaceRecord>().put(
+        v2.WorkspaceRecord()
+          ..workspaceId = 'v2-workspace'
+          ..name = 'Before attachments'
+          ..lifecycle = 'active'
+          ..revision = 1
+          ..createdAt = createdAt
+          ..updatedAt = createdAt,
+      );
+      await legacy.collection<v2.DocumentRecord>().put(
+        v2.DocumentRecord()
+          ..documentId = 'v2-document'
+          ..workspaceId = 'v2-workspace'
+          ..parentId = null
+          ..title = 'Existing note'
+          ..position = 0
+          ..revision = 1
+          ..isDeleted = false
+          ..createdAt = createdAt
+          ..updatedAt = createdAt,
+      );
+      await legacy.collection<v2.SearchProjectionRecord>().put(
+        v2.SearchProjectionRecord()
+          ..documentId = 'v2-document'
+          ..workspaceId = 'v2-workspace'
+          ..title = 'Existing note'
+          ..content = ''
+          ..normalizedText = 'existing note'
+          ..revision = 1,
+      );
+      await legacy.collection<v2.RuntimeStateRecord>().put(
+        v2.RuntimeStateRecord()
+          ..eventSequence = 2
+          ..searchIndexedSequence = 2,
+      );
+    });
+    await legacy.close();
+
+    currentStore = await IsarClientStore.open(
+      directory: profile.path,
+      nativeLibraryPath:
+          '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+          '${Platform.pathSeparator}isar${Platform.pathSeparator}isar.dll',
+      allowDevelopmentDownload: true,
+      instanceName: 'migration-v2-fixture',
+    );
+    final ClientApplicationService service = ClientApplicationService(
+      store: currentStore,
+      clock: const _TestClock(),
+      ids: _TestIds(),
+    );
+
+    expect(
+      (await service.getWorkspace('v2-workspace')).name,
+      'Before attachments',
+    );
+    expect((await service.getDocument('v2-document')).title, 'Existing note');
+    expect((await service.getSearchStatus()).isCurrent, isTrue);
+    expect(await service.listAttachments('v2-document'), isEmpty);
+    expect(await service.pendingAttachmentCommits(), isEmpty);
+  } finally {
+    await currentStore?.close();
+    if (await temporary.exists()) {
+      await temporary.delete(recursive: true);
+    }
+  }
+}
+
+Future<void> _verifyAttachmentRollback(IsarWriteStep step) async {
+  final _StoreFixture fixture = await _StoreFixture.open(
+    'attachment-${step.name}',
+  );
+  try {
+    final CommandReceipt workspace = await fixture.service.createWorkspace(
+      commandId: 'workspace',
+      name: 'Atomic',
+    );
+    final String workspaceId = workspace.result['workspace_id']! as String;
+    final CommandReceipt document = await fixture.service.createDocument(
+      commandId: 'document',
+      workspaceId: workspaceId,
+      title: 'With attachment',
+    );
+    final String documentId = document.result['document_id']! as String;
+    fixture.injector.arm(step);
+
+    await expectLater(
+      fixture.service.attachStagedFile(
+        commandId: 'attach',
+        documentId: documentId,
+        staged: _stagedDraft,
+        expectedDocumentRevision: 1,
+      ),
+      throwsStateError,
+    );
+
+    expect(await fixture.service.pendingAttachmentCommits(), isEmpty);
+    expect(await fixture.service.listAttachments(documentId), isEmpty);
+    expect(
+      await fixture.store.read(
+        (ClientStoreReader reader) => reader.getCommandOutcome('attach'),
+      ),
+      isNull,
+    );
+
+    fixture.injector.disarm();
+    final CommandReceipt attached = await fixture.service.attachStagedFile(
+      commandId: 'attach',
+      documentId: documentId,
+      staged: _stagedDraft,
+      expectedDocumentRevision: 1,
+    );
+    final AttachmentCommitMarker marker =
+        (await fixture.service.pendingAttachmentCommits()).single;
+    await fixture.service.completeAttachmentCommit(marker);
+    await fixture.reopen();
+
+    expect(await fixture.service.listAttachments(documentId), hasLength(1));
+    expect(
+      (await fixture.service.attachStagedFile(
+        commandId: 'attach',
+        documentId: documentId,
+        staged: _stagedDraft,
+        expectedDocumentRevision: 1,
+      )).result['attachment_id'],
+      attached.result['attachment_id'],
+    );
+  } finally {
+    await fixture.dispose();
+  }
+}
+
+Future<void> _verifyAttachmentCompletionRetry() async {
+  final _StoreFixture fixture = await _StoreFixture.open(
+    'attachment-completion',
+  );
+  try {
+    final CommandReceipt workspace = await fixture.service.createWorkspace(
+      commandId: 'workspace',
+      name: 'Atomic',
+    );
+    final CommandReceipt document = await fixture.service.createDocument(
+      commandId: 'document',
+      workspaceId: workspace.result['workspace_id']! as String,
+      title: 'With attachment',
+    );
+    final String documentId = document.result['document_id']! as String;
+    await fixture.service.attachStagedFile(
+      commandId: 'attach',
+      documentId: documentId,
+      staged: _stagedDraft,
+    );
+    final AttachmentCommitMarker marker =
+        (await fixture.service.pendingAttachmentCommits()).single;
+    fixture.injector.arm(IsarWriteStep.attachmentCommitMarkerDelete);
+
+    await expectLater(
+      fixture.service.completeAttachmentCommit(marker),
+      throwsStateError,
+    );
+    expect(await fixture.service.pendingAttachmentCommits(), hasLength(1));
+    fixture.injector.disarm();
+    await fixture.service.completeAttachmentCommit(marker);
+    await fixture.reopen();
+
+    expect(await fixture.service.pendingAttachmentCommits(), isEmpty);
+    expect(await fixture.service.listAttachments(documentId), hasLength(1));
+  } finally {
+    await fixture.dispose();
+  }
+}
+
+const StagedAttachmentDraft _stagedDraft = StagedAttachmentDraft(
+  stagingToken: 'abcdefghijklmnopqrstuvwx',
+  fileName: 'notes.txt',
+  mediaType: 'text/plain',
+  sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  size: 12,
+);
 
 Future<void> _verifyDocumentRollback(IsarWriteStep step) async {
   final _StoreFixture fixture = await _StoreFixture.open(

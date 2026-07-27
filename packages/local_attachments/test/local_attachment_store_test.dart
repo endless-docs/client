@@ -96,6 +96,9 @@ void main() {
       isTrue,
       reason: 'The caller-provided file name is never part of the final path.',
     );
+    await store.releaseToken(staged.token);
+    expect(await committedJournal(staged.token).exists(), isFalse);
+    expect(await collect((await store.openContent(expectedHash)).bytes), bytes);
   });
 
   test(
@@ -177,6 +180,14 @@ void main() {
           bytes: const Stream<List<int>>.empty(),
           fileName: 'safe.txt',
           mediaType: 'text/plain\r\ninjected: value',
+        ),
+        throwsA(_storeError('InvalidArgument')),
+      );
+      await expectLater(
+        store.stage(
+          bytes: const Stream<List<int>>.empty(),
+          fileName: 'safe.txt',
+          mediaType: 'not a media type',
         ),
         throwsA(_storeError('InvalidArgument')),
       );

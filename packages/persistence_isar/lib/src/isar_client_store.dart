@@ -18,6 +18,9 @@ enum IsarWriteStep {
   searchProjectionDelete,
   searchProjectionReplace,
   searchProjectionReplacePut,
+  attachmentRecord,
+  attachmentCommitMarker,
+  attachmentCommitMarkerDelete,
   searchCheckpoint,
   eventSequence,
   commandOutcome,
@@ -62,6 +65,8 @@ final class IsarClientStore implements ClientStore {
         CommandOutcomeRecordSchema,
         OperationRecordSchema,
         SearchProjectionRecordSchema,
+        AttachmentRecordSchema,
+        AttachmentCommitRecordSchema,
         RuntimeStateRecordSchema,
       ],
       directory: directory,
@@ -175,6 +180,54 @@ class _IsarReader implements ClientStoreReader {
     });
     return result;
   }
+
+  @override
+  Future<Attachment?> getAttachment(String attachmentId) async {
+    final AttachmentRecord? record = await isar.attachmentRecords
+        .filter()
+        .attachmentIdEqualTo(attachmentId)
+        .findFirst();
+    return record == null ? null : _attachmentFromRecord(record);
+  }
+
+  @override
+  Future<List<Attachment>> listAttachments(
+    String documentId, {
+    bool includeDeleted = false,
+  }) async {
+    final List<Attachment> result =
+        (await isar.attachmentRecords
+                .filter()
+                .documentIdEqualTo(documentId)
+                .findAll())
+            .map(_attachmentFromRecord)
+            .where((Attachment attachment) {
+              return includeDeleted || !attachment.isDeleted;
+            })
+            .toList();
+    result.sort(
+      (Attachment left, Attachment right) =>
+          left.createdAt.compareTo(right.createdAt),
+    );
+    return result;
+  }
+
+  @override
+  Future<AttachmentCommitMarker?> getAttachmentCommitMarker(
+    String attachmentId,
+  ) async {
+    final AttachmentCommitRecord? record = await isar.attachmentCommitRecords
+        .filter()
+        .attachmentIdEqualTo(attachmentId)
+        .findFirst();
+    return record == null ? null : _attachmentMarkerFromRecord(record);
+  }
+
+  @override
+  Future<List<AttachmentCommitMarker>> listPendingAttachmentCommits() async =>
+      (await isar.attachmentCommitRecords.where().findAll())
+          .map(_attachmentMarkerFromRecord)
+          .toList(growable: false);
 
   @override
   Future<CommandOutcome?> getCommandOutcome(String commandId) async {
@@ -389,6 +442,60 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
   }
 
   @override
+  Future<void> putAttachment(Attachment attachment) async {
+    final AttachmentRecord record =
+        await isar.attachmentRecords
+            .filter()
+            .attachmentIdEqualTo(attachment.id)
+            .findFirst() ??
+        AttachmentRecord();
+    record
+      ..attachmentId = attachment.id
+      ..workspaceId = attachment.workspaceId
+      ..documentId = attachment.documentId
+      ..sha256 = attachment.sha256
+      ..fileName = attachment.fileName
+      ..mediaType = attachment.mediaType
+      ..size = attachment.size
+      ..revision = attachment.revision
+      ..isDeleted = attachment.isDeleted
+      ..createdAt = attachment.createdAt
+      ..updatedAt = attachment.updatedAt;
+    _hit(IsarWriteStep.attachmentRecord);
+    await isar.attachmentRecords.put(record);
+  }
+
+  @override
+  Future<void> putAttachmentCommitMarker(AttachmentCommitMarker marker) async {
+    final AttachmentCommitRecord record =
+        await isar.attachmentCommitRecords
+            .filter()
+            .attachmentIdEqualTo(marker.attachmentId)
+            .findFirst() ??
+        AttachmentCommitRecord();
+    record
+      ..attachmentId = marker.attachmentId
+      ..stagingToken = marker.stagingToken
+      ..sha256 = marker.sha256
+      ..size = marker.size
+      ..createdAt = marker.createdAt;
+    _hit(IsarWriteStep.attachmentCommitMarker);
+    await isar.attachmentCommitRecords.put(record);
+  }
+
+  @override
+  Future<void> removeAttachmentCommitMarker(String attachmentId) async {
+    final AttachmentCommitRecord? record = await isar.attachmentCommitRecords
+        .filter()
+        .attachmentIdEqualTo(attachmentId)
+        .findFirst();
+    if (record != null) {
+      _hit(IsarWriteStep.attachmentCommitMarkerDelete);
+      await isar.attachmentCommitRecords.delete(record.id);
+    }
+  }
+
+  @override
   Future<void> putSearchProjection(SearchProjection projection) async {
     final SearchProjectionRecord record =
         await isar.searchProjectionRecords
@@ -557,3 +664,27 @@ final class _RankedProjection {
   final SearchProjectionRecord projection;
   final int score;
 }
+
+Attachment _attachmentFromRecord(AttachmentRecord record) => Attachment(
+  id: record.attachmentId,
+  workspaceId: record.workspaceId,
+  documentId: record.documentId,
+  fileName: record.fileName,
+  mediaType: record.mediaType,
+  sha256: record.sha256,
+  size: record.size,
+  revision: record.revision,
+  isDeleted: record.isDeleted,
+  createdAt: record.createdAt,
+  updatedAt: record.updatedAt,
+);
+
+AttachmentCommitMarker _attachmentMarkerFromRecord(
+  AttachmentCommitRecord record,
+) => AttachmentCommitMarker(
+  attachmentId: record.attachmentId,
+  stagingToken: record.stagingToken,
+  sha256: record.sha256,
+  size: record.size,
+  createdAt: record.createdAt,
+);

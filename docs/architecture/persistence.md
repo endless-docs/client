@@ -82,12 +82,17 @@ Bytes хранятся в managed filesystem:
 Все resolved paths должны оставаться внутри canonical attachment root. Symlinks,
 path traversal и caller-provided final paths запрещены.
 
-Текущий `local_attachments` adapter доказывает bounded streaming, SHA-256
-content addressing/deduplication, атомарные intent/completion journals,
-interrupted-move recovery, abandoned-staging cleanup и filesystem security
-corpus. Он намеренно не фиксирует authoritative metadata: связывание hash с
-document/block и recovery marker в Isar остаётся следующим application/
-persistence increment.
+Текущий implementation добавляет authoritative `Attachment` collection и
+отдельную filesystem commit-marker collection. Metadata/marker создаются в
+основной transaction вместе с Operation/outcome/sequence; verified filesystem
+commit завершается идемпотентным удалением marker. Bounded streaming, SHA-256
+content addressing/deduplication, interrupted-move recovery,
+abandoned-staging cleanup и security corpus проверены отдельно и через real
+`locald`.
+
+Logical delete пока сохраняет hash-addressed bytes: safe reference-aware GC
+будет добавлен вместе с backup/export policy и не может удалять общий content
+object по одной metadata tombstone.
 
 ## Schema versioning
 

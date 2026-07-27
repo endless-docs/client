@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -56,6 +57,7 @@ final class AppController extends ChangeNotifier {
   List<JsonMap> searchResults = <JsonMap>[];
   List<JsonMap> workspaces = <JsonMap>[];
   List<JsonMap> documents = <JsonMap>[];
+  List<JsonMap> attachments = <JsonMap>[];
   String? selectedWorkspaceId;
   String? selectedDocumentId;
   int _searchRequest = 0;
@@ -223,6 +225,7 @@ final class AppController extends ChangeNotifier {
       selectedWorkspaceId = null;
       selectedDocumentId = null;
       documents = <JsonMap>[];
+      attachments = <JsonMap>[];
       _clearSearchState();
       return;
     }
@@ -245,6 +248,7 @@ final class AppController extends ChangeNotifier {
     final String? workspaceId = selectedWorkspaceId;
     if (workspaceId == null) {
       documents = <JsonMap>[];
+      attachments = <JsonMap>[];
       selectedDocumentId = null;
       _clearSearchState();
       return;
@@ -261,6 +265,19 @@ final class AppController extends ChangeNotifier {
         : showRecycleBin || activeDocuments.isEmpty
         ? null
         : requireString(activeDocuments.first, 'document_id');
+    await _loadAttachments();
+  }
+
+  Future<void> _loadAttachments() async {
+    final String? documentId = selectedDocumentId;
+    if (documentId == null) {
+      attachments = <JsonMap>[];
+      return;
+    }
+    attachments = await _withReconnect(
+      (EndlessLocalApi client) =>
+          client.listAttachments(documentId: documentId),
+    );
   }
 
   Future<void> selectWorkspace(String workspaceId) async {
@@ -283,6 +300,7 @@ final class AppController extends ChangeNotifier {
     await flushPendingChanges();
     selectedDocumentId = documentId;
     showRecycleBin = false;
+    await _loadAttachments();
     notifyListeners();
   }
 
@@ -297,6 +315,7 @@ final class AppController extends ChangeNotifier {
     if (!value && activeDocuments.isNotEmpty) {
       selectedDocumentId = requireString(activeDocuments.first, 'document_id');
     }
+    await _loadAttachments();
     notifyListeners();
   }
 
@@ -400,6 +419,7 @@ final class AppController extends ChangeNotifier {
     _clearSearchState();
     await _loadDocuments();
     selectedDocumentId = requireString(created, 'document_id');
+    await _loadAttachments();
     notifyListeners();
   }
 
@@ -429,6 +449,104 @@ final class AppController extends ChangeNotifier {
     _replaceDocument(saved);
     notifyListeners();
     return saved;
+  }
+
+  Future<void> addAttachmentFromPath(
+    String sourcePath, {
+    String mediaType = 'application/octet-stream',
+  }) async {
+    await flushPendingChanges();
+    final JsonMap? document = selectedDocument;
+    if (document == null) {
+      throw StateError('Select a document first.');
+    }
+    if (!isSelectedWorkspaceWritable) {
+      throw StateError('Archived workspace is read-only.');
+    }
+    final File source = File(sourcePath.trim()).absolute;
+    if (!await source.exists()) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Указанный файл не найден.',
+        retryable: false,
+      );
+    }
+    final int size = await source.length();
+    final JsonMap staged = await _withReconnect(
+      (EndlessLocalApi client) => client.stageAttachment(
+        bytes: source.openRead(),
+        fileName: _baseName(source.path),
+        mediaType: mediaType,
+        contentLength: size,
+      ),
+    );
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.attachStagedFile(
+        commandId: commandId,
+        documentId: requireString(document, 'document_id'),
+        stagingToken: requireString(staged, 'token'),
+        expectedDocumentRevision: requireInt(document, 'revision'),
+      ),
+    );
+    await _loadAttachments();
+    notifyListeners();
+  }
+
+  Future<void> downloadAttachmentToPath(
+    String attachmentId,
+    String targetPath,
+  ) async {
+    final File target = File(targetPath.trim()).absolute;
+    if (await target.exists()) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Файл назначения уже существует.',
+        retryable: false,
+      );
+    }
+    final AttachmentDownload download = await _withReconnect(
+      (EndlessLocalApi client) => client.downloadAttachment(attachmentId),
+    );
+    final IOSink output = target.openWrite(mode: FileMode.writeOnly);
+    bool closed = false;
+    try {
+      await output.addStream(download.bytes);
+      await output.flush();
+      await output.close();
+      closed = true;
+    } on Object {
+      if (!closed) {
+        try {
+          await output.close();
+        } on Object {
+          // Preserve the transfer failure; the partial target is removed below.
+        }
+      }
+      if (await target.exists()) {
+        await target.delete();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> deleteAttachment(String attachmentId) async {
+    if (!isSelectedWorkspaceWritable) {
+      throw StateError('Archived workspace is read-only.');
+    }
+    final JsonMap attachment = attachments.firstWhere(
+      (JsonMap candidate) => candidate['attachment_id'] == attachmentId,
+    );
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.deleteAttachment(
+        commandId: commandId,
+        attachmentId: attachmentId,
+        expectedRevision: requireInt(attachment, 'revision'),
+      ),
+    );
+    await _loadAttachments();
+    notifyListeners();
   }
 
   Future<void> moveDocument({
@@ -644,6 +762,8 @@ final class AppController extends ChangeNotifier {
     }
     return base64Url.encode(bytes).replaceAll('=', '');
   }
+
+  static String _baseName(String path) => path.split(RegExp(r'[\\/]')).last;
 
   @override
   void dispose() {

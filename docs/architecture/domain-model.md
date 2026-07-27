@@ -97,11 +97,14 @@ user delete.
 
 ## Attachment
 
-`Attachment` содержит stable ID, workspace ID, content hash, size, media metadata,
-managed storage state и document/block references.
+`Attachment` содержит stable ID, workspace/document IDs, display file name,
+content hash, size, media metadata, revision и deletion state. Локальная
+готовность bytes представлена application recovery marker и не смешивается с
+logical attachment revision.
 
 Binary bytes не входят в document operation payload. Link/unlink и binary
-lifecycle имеют отдельные commands.
+lifecycle имеют отдельные commands. Logical delete не удаляет hash object
+немедленно: один content object может иметь несколько metadata references.
 
 ## Domain services
 

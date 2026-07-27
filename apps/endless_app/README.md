@@ -14,3 +14,8 @@ Document navigation flushes pending edits before switching; tree, recycle and
 restore operations use the same Local API boundary. Workspace lifecycle has a
 read-only archive mode, and a desktop exit request is cancelled if pending
 editor state cannot be committed locally.
+
+The document editor also lists managed attachments. A user can provide a local
+source path, download to an explicit target path, or delete the logical
+attachment. Source/target paths stay in the UI process and are never persisted
+as attachment metadata.

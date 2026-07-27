@@ -63,5 +63,30 @@ void main() {
       expect(archived.lifecycle, WorkspaceLifecycle.archived);
       expect(archived.revision, 2);
     });
+
+    test(
+      'attachment validation rejects paths and normalizes media metadata',
+      () {
+        expect(validateAttachmentFileName(' notes.txt '), 'notes.txt');
+        expect(validateAttachmentMediaType(' Text/Plain '), 'text/plain');
+        expect(validateAttachmentSize(maxAttachmentBytes), maxAttachmentBytes);
+        expect(
+          () => validateAttachmentFileName('../outside.txt'),
+          throwsA(isA<DomainException>()),
+        );
+        expect(
+          () => validateAttachmentMediaType('text/plain\r\nheader: value'),
+          throwsA(isA<DomainException>()),
+        );
+        expect(
+          () => validateAttachmentHash('not-a-sha256'),
+          throwsA(isA<DomainException>()),
+        );
+        expect(
+          () => validateAttachmentSize(maxAttachmentBytes + 1),
+          throwsA(isA<DomainException>()),
+        );
+      },
+    );
   });
 }

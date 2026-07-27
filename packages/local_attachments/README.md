@@ -15,6 +15,8 @@ The adapter:
 - hashes bytes while staging and deduplicates them by SHA-256;
 - makes commit intent and completion journals durable through atomic rename;
 - completes interrupted commits and cleans only abandoned staging state;
+- releases completed token journals after authoritative metadata no longer
+  needs recovery while retaining content-addressed bytes;
 - rejects traversal, overlapping roots, symbolic-link prefixes and integrity
   mismatches before returning content.
 
