@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:client_domain/client_domain.dart';
 
 import 'attachments.dart';
+import 'backup.dart';
 import 'ports.dart';
 import 'search.dart';
 
@@ -49,6 +50,110 @@ final class ClientApplicationService {
   final ClientStore _store;
   final Clock _clock;
   final IdGenerator _ids;
+
+  Future<ClientBackupSnapshot> createBackupSnapshot() =>
+      _store.read((ClientStoreReader reader) async {
+        if ((await reader.listPendingAttachmentCommits()).isNotEmpty) {
+          throw const ApplicationException(
+            'StorageBusy',
+            'Attachment recovery must finish before a backup can be created.',
+          );
+        }
+        final List<Workspace> workspaces = await reader.listWorkspaces(
+          includeArchived: true,
+          includeDeleted: true,
+        );
+        final List<Document> documents = <Document>[];
+        final List<Attachment> attachments = <Attachment>[];
+        for (final Workspace workspace in workspaces) {
+          final List<Document> ownedDocuments = await reader.listDocuments(
+            workspace.id,
+            includeDeleted: true,
+          );
+          documents.addAll(ownedDocuments);
+          for (final Document document in ownedDocuments) {
+            attachments.addAll(
+              await reader.listAttachments(document.id, includeDeleted: true),
+            );
+          }
+        }
+        return ClientBackupSnapshot(
+          exportedAt: _clock.now(),
+          eventSequence: await reader.currentEventSequence(),
+          workspaces: workspaces,
+          documents: documents,
+          attachments: attachments,
+          operations: await reader.listOperations(),
+          commandOutcomes: await reader.listCommandOutcomes(),
+        );
+      });
+
+  Future<void> ensureCleanRestoreTarget() =>
+      _store.read((ClientStoreReader reader) async {
+        if (!await _isCleanRestoreTarget(reader)) {
+          throw const ApplicationException(
+            'RestoreTargetNotEmpty',
+            'A backup can only be restored into a clean profile.',
+          );
+        }
+      });
+
+  Future<void> restoreBackupSnapshot(ClientBackupSnapshot snapshot) =>
+      _store.write((ClientStoreWriter writer) async {
+        if (!await _isCleanRestoreTarget(writer)) {
+          throw const ApplicationException(
+            'RestoreTargetNotEmpty',
+            'A backup can only be restored into a clean profile.',
+          );
+        }
+        for (final Workspace workspace in snapshot.workspaces) {
+          await writer.putWorkspace(workspace);
+        }
+        for (final Document document in snapshot.documents) {
+          await writer.putDocument(document);
+        }
+        for (final Attachment attachment in snapshot.attachments) {
+          await writer.putAttachment(attachment);
+        }
+        for (final Operation operation in snapshot.operations) {
+          await writer.appendOperation(operation);
+        }
+        for (final CommandOutcome outcome in snapshot.commandOutcomes) {
+          await writer.putCommandOutcome(outcome);
+        }
+        await writer.setEventSequence(snapshot.eventSequence);
+        final Set<String> visibleWorkspaceIds = snapshot.workspaces
+            .where(
+              (Workspace workspace) =>
+                  workspace.lifecycle != WorkspaceLifecycle.deleted,
+            )
+            .map((Workspace workspace) => workspace.id)
+            .toSet();
+        await writer.replaceSearchProjections(
+          snapshot.documents
+              .where(
+                (Document document) =>
+                    !document.isDeleted &&
+                    visibleWorkspaceIds.contains(document.workspaceId),
+              )
+              .map(_searchProjection)
+              .toList(growable: false),
+        );
+        await writer.setSearchIndexedSequence(snapshot.eventSequence);
+      });
+
+  static Future<bool> _isCleanRestoreTarget(ClientStoreReader reader) async {
+    final SearchStatus searchStatus = await reader.getSearchStatus();
+    return (await reader.listWorkspaces(
+          includeArchived: true,
+          includeDeleted: true,
+        )).isEmpty &&
+        (await reader.listOperations()).isEmpty &&
+        (await reader.listCommandOutcomes()).isEmpty &&
+        (await reader.listPendingAttachmentCommits()).isEmpty &&
+        await reader.currentEventSequence() == 0 &&
+        searchStatus.documentCount == 0;
+  }
 
   Future<List<Workspace>> listWorkspaces({bool includeArchived = false}) =>
       _store.read(

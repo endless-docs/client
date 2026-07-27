@@ -14,15 +14,18 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     http.Client? httpClient,
     Duration timeout = const Duration(seconds: 10),
     Duration attachmentTimeout = const Duration(minutes: 2),
+    Duration backupTimeout = const Duration(minutes: 30),
   }) : _endpoint = endpoint,
        _httpClient = httpClient ?? _directLoopbackClient(),
        _timeout = timeout,
-       _attachmentTimeout = attachmentTimeout;
+       _attachmentTimeout = attachmentTimeout,
+       _backupTimeout = backupTimeout;
 
   final EndpointManifest _endpoint;
   final http.Client _httpClient;
   final Duration _timeout;
   final Duration _attachmentTimeout;
+  final Duration _backupTimeout;
   int _requestSequence = 0;
 
   @override
@@ -34,7 +37,13 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     'client_type': clientType.name,
     'client_version': componentVersion,
     'profile_id': profileId,
-    'capabilities': <String>['documents', 'offline', 'attachments'],
+    'capabilities': <String>[
+      'documents',
+      'offline',
+      'attachments',
+      'backup_export',
+      'backup_restore',
+    ],
   });
 
   @override
@@ -423,6 +432,114 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     method: 'RebuildSearchIndex',
     payload: const <String, Object?>{},
   );
+
+  @override
+  Future<ProfileBackupDownload> exportBackup() async {
+    final http.Request request = http.Request(
+      'GET',
+      _endpoint.baseUri.resolve('/v1/backup/export'),
+    )..headers['authorization'] = 'Bearer ${_endpoint.sessionProof}';
+    try {
+      final http.StreamedResponse response = await _httpClient
+          .send(request)
+          .timeout(_backupTimeout);
+      if (response.statusCode != HttpStatus.ok) {
+        final List<int> body = await response.stream.toBytes().timeout(
+          _backupTimeout,
+        );
+        _decodeJsonBytes(body);
+        throw const LocalApiException(
+          code: 'InvalidResponse',
+          message: 'locald returned an invalid backup response.',
+          retryable: true,
+        );
+      }
+      final int? size = response.contentLength;
+      if (size == null || size < 1 || size > maximumBackupArchiveBytes) {
+        throw const LocalApiException(
+          code: 'InvalidResponse',
+          message: 'locald returned an invalid backup size.',
+          retryable: true,
+        );
+      }
+      return ProfileBackupDownload(
+        size: size,
+        bytes: response.stream.timeout(_backupTimeout),
+      );
+    } on LocalApiException {
+      rethrow;
+    } on TimeoutException {
+      throw const LocalApiException(
+        code: 'DeadlineExceeded',
+        message: 'Backup export did not complete in time.',
+        retryable: true,
+      );
+    } on Object catch (error) {
+      throw LocalApiException(
+        code: 'LocaldUnavailable',
+        message: 'Cannot export local backup: $error',
+        retryable: true,
+      );
+    }
+  }
+
+  @override
+  Future<JsonMap> restoreBackup({
+    required Stream<List<int>> bytes,
+    int? contentLength,
+  }) async {
+    if (contentLength != null &&
+        (contentLength < 1 || contentLength > maximumBackupArchiveBytes)) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Backup content length is outside the supported range.',
+        retryable: false,
+      );
+    }
+    final http.StreamedRequest request =
+        http.StreamedRequest(
+            'POST',
+            _endpoint.baseUri.resolve('/v1/backup/restore'),
+          )
+          ..headers['authorization'] = 'Bearer ${_endpoint.sessionProof}'
+          ..headers['content-type'] = 'application/vnd.endless.backup';
+    if (contentLength != null) {
+      request.contentLength = contentLength;
+    }
+    bool requestClosed = false;
+    try {
+      final Future<http.StreamedResponse> responseFuture = _httpClient.send(
+        request,
+      );
+      await request.sink.addStream(bytes).timeout(_backupTimeout);
+      await request.sink.close();
+      requestClosed = true;
+      final http.StreamedResponse response = await responseFuture.timeout(
+        _backupTimeout,
+      );
+      final List<int> body = await response.stream.toBytes().timeout(
+        _backupTimeout,
+      );
+      return _decodeJsonBytes(body);
+    } on LocalApiException {
+      await _closeUploadRequest(request, requestClosed);
+      rethrow;
+    } on TimeoutException {
+      await _closeUploadRequest(request, requestClosed);
+      throw const LocalApiException(
+        code: 'DeadlineExceeded',
+        message: 'Backup restore did not complete in time.',
+        retryable: true,
+      );
+    } on Object catch (error) {
+      await _closeUploadRequest(request, requestClosed);
+      throw LocalApiException(
+        code: 'LocaldUnavailable',
+        message: 'Cannot restore local backup: $error',
+        retryable: true,
+      );
+    }
+  }
 
   Future<JsonMap> _query(String method, {JsonMap? payload}) =>
       _post('/v1/query', <String, Object?>{

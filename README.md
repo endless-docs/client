@@ -21,15 +21,18 @@
 - вложения загружаются потоково из Flutter UI/CLI, получают authoritative
   metadata в Isar, хранятся по SHA-256 и восстанавливаются после прерывания
   между database commit и filesystem move;
+- versioned backup переносит authoritative records, tombstones, Operation Log,
+  command outcomes и проверенные bytes вложений; clean-profile restore
+  транзакционно публикует metadata и заново строит search projection;
 - отдельный pure Dart process `locald` — единственный владелец Isar;
 - UI и CLI подключаются через authenticated Local API на `127.0.0.1`;
 - domain mutation, command outcome, Operation Log и event sequence фиксируются
   одной durable Isar transaction;
 - собранный Windows bundle включает `locald.exe` и `isar.dll`, поэтому runtime не
   скачивает компоненты и не требует внешнего сервера;
-- cold restart, search/attachment repair, duplicate `command_id`, unauthorized
-  request, architecture boundaries и Flutter states покрыты автоматическими
-  тестами.
+- cold restart, search/attachment repair, backup clean restore, duplicate
+  `command_id`, unauthorized request, architecture boundaries и Flutter states
+  покрыты автоматическими тестами.
 
 Полная матрица реализованного и ещё необходимого находится в
 [implementation status](docs/architecture/implementation-status.md).

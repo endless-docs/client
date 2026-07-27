@@ -68,6 +68,12 @@ Flutter UI / CLI
 - attachment metadata/marker/Operation/outcome/sequence атомарны в Isar;
   pending metadata скрыта, а startup repair проверен после metadata commit и
   после content commit; Flutter UI и CLI используют тот же Local API flow;
+- versioned backup строится из consistent application snapshot, включает
+  tombstones, Operation Log, command outcomes и deduplicated attachment bytes;
+  reader ограничивает archive/manifest, проверяет структуру, ссылки, размеры и
+  SHA-256, а clean-profile restore публикует Isar metadata одной transaction и
+  перестраивает search projection; real-Isar fault matrix откатывает restore на
+  каждом типе authoritative/projection write и подтверждает same-archive retry;
 - release bundle содержит Flutter UI, CLI, `locald` и native Isar library;
 - packaged CLI создаёт и читает данные после forced `locald` restart при
   недоступном внешнем proxy.
@@ -81,8 +87,8 @@ Flutter UI / CLI
 ```
 
 Она запускает format check, `flutter analyze`, import-boundary checker, domain,
-application, Local API, attachment filesystem, runtime, real Isar, `locald`
-HTTP и Flutter widget tests.
+application, Local API, attachment filesystem, backup corpus, runtime, real
+Isar, `locald` HTTP и Flutter widget tests.
 
 Сборка self-contained Windows bundle:
 
@@ -96,7 +102,8 @@ Bundle появляется в `dist/endless-windows-x64`. Isar native library �
 отсутствует. Smoke блокирует внешний proxy, создаёт данные packaged CLI,
 проверяет workspace lifecycle и managed attachment upload, принудительно
 завершает bundled `locald`, проверяет document/search/attachment download после
-cold restart, затем выполняет search rebuild.
+cold restart, выполняет search rebuild и backup → clean-profile restore с
+повторной проверкой search и attachment bytes.
 
 ## Acceptance evidence
 
@@ -110,7 +117,8 @@ cold restart, затем выполняет search rebuild.
 | Operation atomicity | Real Isar fault injection at document/block/attachment marker/projection/sequence/operation/outcome writes plus durable retry after reopen | Proven for injected exceptions; process-kill-during-Isar-commit evidence pending |
 | Offline editor recovery | Autosave, flush-before-navigation, exit-request flush and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
 | Rebuildable local search | Application update/delete/restore/rebuild tests, real Isar/locald post-upgrade repair and cold-reopen tests, widget result UX and packaged smoke | Proven for correctness; 10k/100k benchmark and D6 decision pending |
-| Managed attachments | Bounded streaming/SHA-256, authoritative Isar metadata/marker transaction, two process interruption points, dedup/download/cold reopen, tamper/traversal/symlink corpus, Flutter/CLI UX and packaged smoke | End-to-end offline flow proven; backup/export, reference-safe GC, performance evidence and D7 decision pending |
+| Managed attachments | Bounded streaming/SHA-256, authoritative Isar metadata/marker transaction, two process interruption points, dedup/download/cold reopen, tamper/traversal/symlink corpus, Flutter/CLI UX and packaged smoke | End-to-end offline flow and backup round trip proven; reference-safe GC, performance evidence and D7 decision pending |
+| Backup / clean restore | Versioned bounded archive corpus plus `locald` round trip preserving tombstones, history, outcomes, search and attachment bytes; packaged CLI smoke | Proven for clean target profile; replacement of a non-empty active profile with retained rollback generation pending |
 | Release build | Windows release bundle build script | Proven; installer/signing not implemented |
 
 ## Known gaps
@@ -118,8 +126,8 @@ cold restart, затем выполняет search rebuild.
 Полная Client MVP пока не достигнута. Обязательные следующие work packages:
 
 1. Multi-block editor после решения D5.
-2. Versioned import/export и backup/restore с attachment round trip; добавить
-   reference-safe cleanup unreferenced content.
+2. Reference-safe cleanup unreferenced attachment content; staged replacement
+   restore для непустого active profile.
 3. MCP adapter, scopes, approval и audit.
 4. Event subscription/reconnect и multi-client concurrency.
 5. Disk-full/permission and process-kill-during-commit matrix; add a versioned

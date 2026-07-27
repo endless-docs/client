@@ -758,6 +758,19 @@ final class _FakeLocalApi implements EndlessLocalApi {
   Future<JsonMap> rebuildSearchIndex({required String commandId}) =>
       getSearchStatus();
 
+  @override
+  Future<ProfileBackupDownload> exportBackup() async =>
+      ProfileBackupDownload(size: 1, bytes: Stream<List<int>>.value(<int>[0]));
+
+  @override
+  Future<JsonMap> restoreBackup({
+    required Stream<List<int>> bytes,
+    int? contentLength,
+  }) async {
+    await bytes.drain<void>();
+    return <String, Object?>{'format_version': 1};
+  }
+
   int _indexOf(String documentId) {
     final int index = _documents.indexWhere(
       (JsonMap document) => document['document_id'] == documentId,

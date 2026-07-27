@@ -169,6 +169,26 @@ void main() {
       timeout: const Timeout(Duration(minutes: 2)),
     );
   }
+
+  for (final IsarWriteStep step in <IsarWriteStep>[
+    IsarWriteStep.workspaceRecord,
+    IsarWriteStep.documentRecord,
+    IsarWriteStep.blockDelete,
+    IsarWriteStep.blockPut,
+    IsarWriteStep.attachmentRecord,
+    IsarWriteStep.operationRecord,
+    IsarWriteStep.commandOutcome,
+    IsarWriteStep.eventSequence,
+    IsarWriteStep.searchProjectionReplace,
+    IsarWriteStep.searchProjectionReplacePut,
+    IsarWriteStep.searchCheckpoint,
+  ]) {
+    test(
+      'backup restore rolls back at ${step.name} and retries cleanly',
+      () => _verifyBackupRestoreRollback(step),
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  }
 }
 
 Future<void> _verifySchemaV1Migration() async {
@@ -671,6 +691,138 @@ Future<void> _verifySearchRebuildRollback(IsarWriteStep step) async {
   } finally {
     await fixture.dispose();
   }
+}
+
+Future<void> _verifyBackupRestoreRollback(IsarWriteStep step) async {
+  final _StoreFixture fixture = await _StoreFixture.open(
+    'backup-restore-${step.name}',
+  );
+  try {
+    final ClientBackupSnapshot snapshot = _backupSnapshot();
+    fixture.injector.arm(step);
+
+    await expectLater(
+      fixture.service.restoreBackupSnapshot(snapshot),
+      throwsStateError,
+    );
+    await fixture.service.ensureCleanRestoreTarget();
+    final SearchStatus rolledBack = await fixture.service.getSearchStatus();
+    expect(rolledBack.eventSequence, 0);
+    expect(rolledBack.documentCount, 0);
+    expect(
+      await fixture.store.read(
+        (ClientStoreReader reader) => reader.listOperations(),
+      ),
+      isEmpty,
+    );
+    expect(
+      await fixture.store.read(
+        (ClientStoreReader reader) => reader.listCommandOutcomes(),
+      ),
+      isEmpty,
+    );
+
+    await fixture.service.restoreBackupSnapshot(snapshot);
+    await fixture.reopen();
+
+    expect(
+      (await fixture.service.getWorkspace('backup-workspace')).name,
+      'Backup',
+    );
+    expect(
+      await fixture.service.searchDocuments(
+        workspaceId: 'backup-workspace',
+        query: 'restored text',
+      ),
+      hasLength(1),
+    );
+    expect(
+      await fixture.service.listAttachments('backup-document'),
+      hasLength(1),
+    );
+    expect((await fixture.service.getSearchStatus()).indexedSequence, 1);
+  } finally {
+    await fixture.dispose();
+  }
+}
+
+ClientBackupSnapshot _backupSnapshot() {
+  final DateTime timestamp = DateTime.utc(2026, 1, 1);
+  return ClientBackupSnapshot(
+    exportedAt: timestamp,
+    eventSequence: 1,
+    workspaces: <Workspace>[
+      Workspace(
+        id: 'backup-workspace',
+        name: 'Backup',
+        lifecycle: WorkspaceLifecycle.active,
+        revision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      ),
+    ],
+    documents: <Document>[
+      Document(
+        id: 'backup-document',
+        workspaceId: 'backup-workspace',
+        title: 'Restored',
+        parentId: null,
+        position: 0,
+        blocks: <Block>[
+          Block(
+            id: 'backup-block',
+            documentId: 'backup-document',
+            type: BlockType.paragraph,
+            payload: const <String, Object?>{'text': 'restored text'},
+            position: 0,
+            revision: 1,
+          ),
+        ],
+        revision: 1,
+        isDeleted: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      ),
+    ],
+    attachments: <Attachment>[
+      Attachment(
+        id: 'backup-attachment',
+        workspaceId: 'backup-workspace',
+        documentId: 'backup-document',
+        fileName: 'restored.txt',
+        mediaType: 'text/plain',
+        sha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        size: 12,
+        revision: 1,
+        isDeleted: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      ),
+    ],
+    operations: <Operation>[
+      Operation(
+        id: 'backup-operation',
+        workspaceId: 'backup-workspace',
+        objectId: 'backup-document',
+        sequence: 1,
+        type: 'CreateDocument',
+        baseRevision: 0,
+        resultRevision: 1,
+        payload: const <String, Object?>{'title': 'Restored'},
+        createdAt: timestamp,
+      ),
+    ],
+    commandOutcomes: const <CommandOutcome>[
+      CommandOutcome(
+        commandId: 'backup-command',
+        method: 'CreateDocument',
+        fingerprint: '{}',
+        result: <String, Object?>{'document_id': 'backup-document'},
+        commitSequence: 1,
+      ),
+    ],
+  );
 }
 
 final class _StoreFixture {

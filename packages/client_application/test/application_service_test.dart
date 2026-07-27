@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:client_application/client_application.dart';
 import 'package:client_domain/client_domain.dart';
@@ -462,6 +463,167 @@ void main() {
     expect(store.attachmentMarkers, isEmpty);
     expect(store.outcomes.containsKey('attach'), isFalse);
   });
+
+  test(
+    'backup snapshot round-trips tombstones, history, outcomes, and search',
+    () async {
+      final CommandReceipt workspace = await service.createWorkspace(
+        commandId: 'workspace',
+        name: 'Portable',
+      );
+      final String workspaceId = workspace.result['workspace_id']! as String;
+      final CommandReceipt document = await service.createDocument(
+        commandId: 'document',
+        workspaceId: workspaceId,
+        title: 'Offline source',
+      );
+      final String documentId = document.result['document_id']! as String;
+      await service.saveDocument(
+        commandId: 'save-document',
+        documentId: documentId,
+        title: 'Offline source',
+        blocks: const <BlockDraft>[
+          BlockDraft(
+            type: BlockType.paragraph,
+            payload: <String, Object?>{'text': 'restored searchable content'},
+          ),
+        ],
+      );
+      final CommandReceipt attached = await service.attachStagedFile(
+        commandId: 'attach',
+        documentId: documentId,
+        staged: const StagedAttachmentDraft(
+          stagingToken: 'abcdefghijklmnopqrstuvwx',
+          fileName: 'portable.txt',
+          mediaType: 'text/plain',
+          sha256:
+              '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          size: 12,
+        ),
+      );
+      await service.completeAttachmentCommit(
+        (await service.pendingAttachmentCommits()).single,
+      );
+      await service.deleteAttachment(
+        commandId: 'delete-attachment',
+        attachmentId: attached.result['attachment_id']! as String,
+      );
+      await service.archiveWorkspace(
+        commandId: 'archive',
+        workspaceId: workspaceId,
+        archived: true,
+      );
+
+      final ClientBackupSnapshot original = await service
+          .createBackupSnapshot();
+      final ClientBackupSnapshot decoded = ClientBackupSnapshot.fromJson(
+        jsonDecode(jsonEncode(original.toJson())) as Map<String, Object?>,
+      );
+      final _MemoryStore restoredStore = _MemoryStore();
+      final ClientApplicationService restored = ClientApplicationService(
+        store: restoredStore,
+        clock: _FixedClock(),
+        ids: _SequentialIds(),
+      );
+      await restored.restoreBackupSnapshot(decoded);
+
+      expect(restoredStore.sequence, original.eventSequence);
+      expect(restoredStore.operations, hasLength(original.operations.length));
+      expect(
+        restoredStore.outcomes,
+        hasLength(original.commandOutcomes.length),
+      );
+      expect(restoredStore.searchIndexedSequence, original.eventSequence);
+      expect(
+        await restored.listWorkspaces(includeArchived: true),
+        hasLength(1),
+      );
+      expect(
+        await restored.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'searchable',
+        ),
+        hasLength(1),
+      );
+      expect(
+        await restored.listAttachments(documentId, includeDeleted: true),
+        hasLength(1),
+      );
+      expect(
+        (await restored.createWorkspace(
+          commandId: 'workspace',
+          name: 'Portable',
+        )).wasReplay,
+        isTrue,
+      );
+      await expectLater(
+        restored.restoreBackupSnapshot(decoded),
+        throwsA(
+          isA<ApplicationException>().having(
+            (ApplicationException error) => error.code,
+            'code',
+            'RestoreTargetNotEmpty',
+          ),
+        ),
+      );
+    },
+  );
+
+  test('backup snapshot rejects cyclic document trees', () {
+    final DateTime now = DateTime.utc(2026, 1, 1);
+    expect(
+      () => ClientBackupSnapshot(
+        exportedAt: now,
+        eventSequence: 0,
+        workspaces: <Workspace>[
+          Workspace(
+            id: 'workspace',
+            name: 'Invalid',
+            lifecycle: WorkspaceLifecycle.active,
+            revision: 1,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
+        documents: <Document>[
+          Document(
+            id: 'first',
+            workspaceId: 'workspace',
+            title: 'First',
+            parentId: 'second',
+            position: 0,
+            blocks: const <Block>[],
+            revision: 1,
+            isDeleted: false,
+            createdAt: now,
+            updatedAt: now,
+          ),
+          Document(
+            id: 'second',
+            workspaceId: 'workspace',
+            title: 'Second',
+            parentId: 'first',
+            position: 1,
+            blocks: const <Block>[],
+            revision: 1,
+            isDeleted: false,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
+        attachments: const <Attachment>[],
+        operations: const <Operation>[],
+        commandOutcomes: const <CommandOutcome>[],
+      ),
+      throwsA(
+        isA<BackupSnapshotException>().having(
+          (BackupSnapshotException error) => error.code,
+          'code',
+          'BackupInvalid',
+        ),
+      ),
+    );
+  });
 }
 
 final class _FixedClock implements Clock {
@@ -602,14 +764,25 @@ final class _MemoryTransaction implements ClientStoreWriter {
   @override
   Future<List<Workspace>> listWorkspaces({
     bool includeArchived = false,
+    bool includeDeleted = false,
   }) async => store.workspaces.values
       .where(
         (Workspace workspace) =>
-            workspace.lifecycle != WorkspaceLifecycle.deleted &&
+            (includeDeleted ||
+                workspace.lifecycle != WorkspaceLifecycle.deleted) &&
             (includeArchived ||
+                includeDeleted ||
                 workspace.lifecycle == WorkspaceLifecycle.active),
       )
       .toList();
+
+  @override
+  Future<List<Operation>> listOperations() async =>
+      List<Operation>.of(store.operations);
+
+  @override
+  Future<List<CommandOutcome>> listCommandOutcomes() async =>
+      store.outcomes.values.toList();
 
   @override
   Future<SearchStatus> getSearchStatus() async => SearchStatus(
@@ -708,5 +881,10 @@ final class _MemoryTransaction implements ClientStoreWriter {
   @override
   Future<void> setSearchIndexedSequence(int sequence) async {
     store.searchIndexedSequence = sequence;
+  }
+
+  @override
+  Future<void> setEventSequence(int sequence) async {
+    store.sequence = sequence;
   }
 }

@@ -8,6 +8,7 @@ import 'package:client_application/client_application.dart';
 import 'package:client_domain/client_domain.dart';
 import 'package:local_api/local_api.dart';
 import 'package:local_attachments/local_attachments.dart';
+import 'package:local_backup/local_backup.dart' as backup;
 import 'package:persistence_isar/persistence_isar.dart';
 import 'package:platform_runtime/platform_runtime.dart';
 
@@ -124,7 +125,9 @@ final class LocaldServer {
     try {
       final bool isAttachmentDownload =
           request.uri.path == '/v1/attachments/content';
-      if (request.method != (isAttachmentDownload ? 'GET' : 'POST')) {
+      final bool isBackupExport = request.uri.path == '/v1/backup/export';
+      final bool acceptsGet = isAttachmentDownload || isBackupExport;
+      if (request.method != (acceptsGet ? 'GET' : 'POST')) {
         throw const _HttpApiError(
           status: HttpStatus.methodNotAllowed,
           error: LocalApiException(
@@ -165,6 +168,28 @@ final class LocaldServer {
       }
       if (isAttachmentDownload) {
         await _downloadAttachment(request);
+        return;
+      }
+      if (isBackupExport) {
+        await _exportBackup(request);
+        return;
+      }
+      if (request.uri.path == '/v1/backup/restore') {
+        if (request.contentLength > maximumBackupArchiveBytes) {
+          throw const _HttpApiError(
+            status: HttpStatus.requestEntityTooLarge,
+            error: LocalApiException(
+              code: 'BackupArchiveTooLarge',
+              message: 'Backup archive exceeds the supported byte limit.',
+              retryable: false,
+            ),
+          );
+        }
+        final JsonMap data = await _restoreBackup(request);
+        await _respond(request.response, HttpStatus.ok, <String, Object?>{
+          'ok': true,
+          'data': data,
+        });
         return;
       }
       final int contentLength = request.contentLength;
@@ -239,6 +264,20 @@ final class LocaldServer {
         ),
         correlationId,
       );
+    } on backup.BackupArchiveException catch (failure) {
+      await _respondError(
+        request.response,
+        failure.code == 'BackupArchiveTooLarge' ||
+                failure.code == 'BackupManifestTooLarge'
+            ? HttpStatus.requestEntityTooLarge
+            : HttpStatus.badRequest,
+        LocalApiException(
+          code: failure.code,
+          message: failure.message,
+          retryable: false,
+        ),
+        correlationId,
+      );
     } on FormatException catch (failure) {
       await _respondError(
         request.response,
@@ -305,6 +344,8 @@ final class LocaldServer {
         'search',
         'search_rebuild',
         'attachments',
+        'backup_export',
+        'backup_restore',
       ],
       'compatibility': 'compatible',
     };
@@ -498,6 +539,91 @@ final class LocaldServer {
       );
     await request.response.addStream(content.bytes);
     await request.response.close();
+  }
+
+  Future<void> _exportBackup(HttpRequest request) async {
+    final ClientBackupSnapshot snapshot = await _application
+        .createBackupSnapshot();
+    final backup.BackupArchiveWriter archive =
+        await backup.BackupArchiveWriter.prepare(
+          snapshot: snapshot,
+          openContent: (String hash, int expectedSize) async {
+            final AttachmentContent content = await _attachmentStore
+                .openContent(hash);
+            if (content.size != expectedSize) {
+              throw const backup.BackupArchiveException(
+                'BackupAttachmentMismatch',
+                'Attachment bytes do not match authoritative metadata.',
+              );
+            }
+            return backup.BackupContent(
+              sha256: content.sha256,
+              size: content.size,
+              bytes: content.bytes,
+            );
+          },
+        );
+    request.response
+      ..statusCode = HttpStatus.ok
+      ..contentLength = archive.contentLength
+      ..headers.set(
+        HttpHeaders.contentTypeHeader,
+        'application/vnd.endless.backup',
+      )
+      ..headers.set('cache-control', 'no-store')
+      ..headers.set(
+        'content-disposition',
+        'attachment; filename="endless-${paths.profileId}.backup"',
+      );
+    await request.response.addStream(archive.openRead());
+    await request.response.close();
+  }
+
+  Future<JsonMap> _restoreBackup(HttpRequest request) async {
+    final backup.BackupArchiveReader archive =
+        await backup.BackupArchiveReader.stage(
+          bytes: request,
+          stagingDirectory: paths.backupStaging.path,
+          maximumArchiveBytes: maximumBackupArchiveBytes,
+        );
+    try {
+      await _application.ensureCleanRestoreTarget();
+      for (final String hash in archive.contentHashes) {
+        final backup.BackupContent content = archive.openContent(hash);
+        final StagedAttachment staged = await _attachmentStore.stage(
+          bytes: content.bytes,
+          fileName: '$hash.bin',
+          mediaType: 'application/octet-stream',
+        );
+        if (staged.sha256 != hash || staged.size != content.size) {
+          throw const backup.BackupArchiveException(
+            'BackupAttachmentMismatch',
+            'Restored attachment bytes failed their integrity check.',
+          );
+        }
+        final StagedAttachment committed = await _attachmentStore.commit(
+          staged.token,
+        );
+        if (committed.sha256 != hash || committed.size != content.size) {
+          throw const backup.BackupArchiveException(
+            'BackupAttachmentMismatch',
+            'Committed attachment bytes failed their integrity check.',
+          );
+        }
+        await _attachmentStore.releaseToken(staged.token);
+      }
+      await _application.restoreBackupSnapshot(archive.snapshot);
+      return <String, Object?>{
+        'format_version': clientBackupFormatVersion,
+        'workspaces': archive.snapshot.workspaces.length,
+        'documents': archive.snapshot.documents.length,
+        'attachments': archive.snapshot.attachments.length,
+        'operations': archive.snapshot.operations.length,
+        'event_sequence': archive.snapshot.eventSequence,
+      };
+    } finally {
+      await archive.dispose();
+    }
   }
 
   Future<CommandReceipt> _attachStagedFile({
@@ -710,6 +836,7 @@ final class LocaldServer {
     'AttachmentNotFound' => HttpStatus.notFound,
     'RevisionConflict' ||
     'CommandIdReused' ||
+    'RestoreTargetNotEmpty' ||
     'AttachmentRecoveryConflict' => HttpStatus.conflict,
     _ => HttpStatus.badRequest,
   };

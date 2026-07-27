@@ -241,6 +241,63 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
       'output_path': target.path,
     };
   }
+  if (command.length == 3 && command[0] == 'backup' && command[1] == 'export') {
+    final File target = File(command[2]).absolute;
+    if (await target.exists()) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Backup export target already exists.',
+        retryable: false,
+      );
+    }
+    final ProfileBackupDownload backup = await client.exportBackup();
+    final IOSink output = target.openWrite(mode: FileMode.writeOnly);
+    bool closed = false;
+    try {
+      await output.addStream(backup.bytes);
+      await output.flush();
+      await output.close();
+      closed = true;
+      if (await target.length() != backup.size) {
+        throw const LocalApiException(
+          code: 'InvalidResponse',
+          message: 'Backup export ended at an unexpected size.',
+          retryable: true,
+        );
+      }
+    } on Object {
+      if (!closed) {
+        try {
+          await output.close();
+        } on Object {
+          // Preserve the transfer failure; the partial target is removed below.
+        }
+      }
+      if (await target.exists()) {
+        await target.delete();
+      }
+      rethrow;
+    }
+    return <String, Object?>{
+      'format_version': 1,
+      'size': backup.size,
+      'output_path': target.path,
+    };
+  }
+  if (command.length == 3 &&
+      command[0] == 'backup' &&
+      command[1] == 'restore') {
+    final File source = File(command[2]).absolute;
+    if (!await source.exists()) {
+      throw const LocalApiException(
+        code: 'InvalidArgument',
+        message: 'Backup source file does not exist.',
+        retryable: false,
+      );
+    }
+    final int size = await source.length();
+    return client.restoreBackup(bytes: source.openRead(), contentLength: size);
+  }
   if (command.length >= 3 && command[0] == 'search') {
     return client.searchDocuments(
       workspaceId: command[1],
@@ -292,7 +349,7 @@ int _exitCode(String errorCode) => switch (errorCode) {
   'InvalidArgument' => 2,
   'Unauthenticated' || 'ScopeDenied' => 77,
   'WorkspaceNotFound' || 'DocumentNotFound' || 'AttachmentNotFound' => 66,
-  'RevisionConflict' || 'CommandIdReused' => 75,
+  'RevisionConflict' || 'CommandIdReused' || 'RestoreTargetNotEmpty' => 75,
   'LocaldUnavailable' || 'LocaldStarting' => 69,
   _ => 70,
 };
@@ -371,6 +428,8 @@ Usage:
   endless [options] attachment get ATTACHMENT_ID
   endless [options] attachment delete ATTACHMENT_ID
   endless [options] attachment download ATTACHMENT_ID OUTPUT_PATH
+  endless [options] backup export OUTPUT_PATH
+  endless [options] backup restore INPUT_PATH
   endless [options] search WORKSPACE_ID QUERY
   endless [options] search-index status
   endless [options] search-index rebuild

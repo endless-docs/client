@@ -65,6 +65,16 @@ void main() {
         'package:local_api',
       ],
     ),
+    const _Rule(
+      root: 'packages/local_backup',
+      forbiddenImports: <String>[
+        'package:flutter/',
+        'package:isar',
+        'package:persistence_isar',
+        'package:local_attachments',
+        'package:local_api',
+      ],
+    ),
   ];
   final List<String> violations = <String>[];
 

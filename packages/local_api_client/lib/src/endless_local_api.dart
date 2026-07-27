@@ -18,6 +18,13 @@ final class AttachmentDownload {
   final Stream<List<int>> bytes;
 }
 
+final class ProfileBackupDownload {
+  const ProfileBackupDownload({required this.size, required this.bytes});
+
+  final int size;
+  final Stream<List<int>> bytes;
+}
+
 abstract interface class EndlessLocalApi {
   Future<JsonMap> handshake({
     required LocalClientType clientType,
@@ -135,6 +142,13 @@ abstract interface class EndlessLocalApi {
   Future<JsonMap> getSearchStatus();
 
   Future<JsonMap> rebuildSearchIndex({required String commandId});
+
+  Future<ProfileBackupDownload> exportBackup();
+
+  Future<JsonMap> restoreBackup({
+    required Stream<List<int>> bytes,
+    int? contentLength,
+  });
 
   Future<void> close();
 }

@@ -80,9 +80,8 @@ final class IsarClientStore implements ClientStore {
   Future<void> close() => _isar.close();
 
   @override
-  Future<T> read<T>(
-    FutureOr<T> Function(ClientStoreReader reader) operation,
-  ) async => operation(_IsarReader(_isar));
+  Future<T> read<T>(FutureOr<T> Function(ClientStoreReader reader) operation) =>
+      _isar.txn<T>(() async => operation(_IsarReader(_isar)));
 
   @override
   Future<T> write<T>(
@@ -123,7 +122,10 @@ class _IsarReader implements ClientStoreReader {
   }
 
   @override
-  Future<List<Workspace>> listWorkspaces({bool includeArchived = false}) async {
+  Future<List<Workspace>> listWorkspaces({
+    bool includeArchived = false,
+    bool includeDeleted = false,
+  }) async {
     final List<WorkspaceRecord> records = await isar.workspaceRecords
         .where()
         .findAll();
@@ -131,8 +133,10 @@ class _IsarReader implements ClientStoreReader {
         .map(_workspaceFromRecord)
         .where(
           (Workspace workspace) =>
-              workspace.lifecycle != WorkspaceLifecycle.deleted &&
+              (includeDeleted ||
+                  workspace.lifecycle != WorkspaceLifecycle.deleted) &&
               (includeArchived ||
+                  includeDeleted ||
                   workspace.lifecycle == WorkspaceLifecycle.active),
         )
         .toList();
@@ -241,13 +245,33 @@ class _IsarReader implements ClientStoreReader {
     if (record == null) {
       return null;
     }
-    return CommandOutcome(
-      commandId: record.commandId,
-      method: record.method,
-      fingerprint: record.fingerprint,
-      result: _decodeMap(record.resultJson),
-      commitSequence: record.commitSequence,
+    return _outcomeFromRecord(record);
+  }
+
+  @override
+  Future<List<CommandOutcome>> listCommandOutcomes() async {
+    final List<CommandOutcome> result =
+        (await isar.commandOutcomeRecords.where().findAll())
+            .map(_outcomeFromRecord)
+            .toList();
+    result.sort(
+      (CommandOutcome left, CommandOutcome right) =>
+          left.commandId.compareTo(right.commandId),
     );
+    return result;
+  }
+
+  @override
+  Future<List<Operation>> listOperations() async {
+    final List<Operation> result =
+        (await isar.operationRecords.where().findAll())
+            .map(_operationFromRecord)
+            .toList();
+    result.sort(
+      (Operation left, Operation right) =>
+          left.sequence.compareTo(right.sequence),
+    );
+    return result;
   }
 
   @override
@@ -360,6 +384,27 @@ class _IsarReader implements ClientStoreReader {
     revision: record.revision,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  );
+
+  static CommandOutcome _outcomeFromRecord(CommandOutcomeRecord record) =>
+      CommandOutcome(
+        commandId: record.commandId,
+        method: record.method,
+        fingerprint: record.fingerprint,
+        result: _decodeMap(record.resultJson),
+        commitSequence: record.commitSequence,
+      );
+
+  static Operation _operationFromRecord(OperationRecord record) => Operation(
+    id: record.operationId,
+    workspaceId: record.workspaceId,
+    objectId: record.objectId,
+    sequence: record.sequence,
+    type: record.type,
+    baseRevision: record.baseRevision,
+    resultRevision: record.resultRevision,
+    payload: _decodeMap(record.payloadJson),
+    createdAt: record.createdAt,
   );
 }
 
@@ -563,6 +608,18 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
     _hit(IsarWriteStep.eventSequence);
     await isar.runtimeStateRecords.put(state);
     return state.eventSequence;
+  }
+
+  @override
+  Future<void> setEventSequence(int sequence) async {
+    final RuntimeStateRecord state =
+        await isar.runtimeStateRecords.get(1) ??
+        (RuntimeStateRecord()
+          ..eventSequence = 0
+          ..searchIndexedSequence = 0);
+    state.eventSequence = sequence;
+    _hit(IsarWriteStep.eventSequence);
+    await isar.runtimeStateRecords.put(state);
   }
 
   @override

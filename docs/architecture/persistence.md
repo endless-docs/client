@@ -116,6 +116,16 @@ Restore:
 4. Переключает active profile атомарно.
 5. Сохраняет предыдущий profile до подтверждённого запуска.
 
+Текущий реализованный этап намеренно ограничен clean-profile restore: archive
+сначала целиком принимается в bounded staging file, затем проверяются version,
+referential integrity, declared sizes и SHA-256 каждого content object.
+Attachment bytes коммитятся content-addressed до metadata, после чего
+workspaces/documents/blocks/attachments, Operation Log, command outcomes и
+event sequence публикуются одной Isar transaction; search projection строится
+заново. Любая ошибка до этой transaction оставляет профиль логически пустым и
+допускает безопасный retry. Замена непустого active profile с сохранением
+rollback generation остаётся следующим этапом полного restore workflow.
+
 ## Corruption and disk pressure
 
 - `DiskFull` не подтверждает command.

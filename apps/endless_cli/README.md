@@ -31,3 +31,11 @@ endless attachment get ATTACHMENT_ID
 endless attachment delete ATTACHMENT_ID
 endless attachment download ATTACHMENT_ID OUTPUT_PATH
 ```
+
+Versioned backup archives are streamed through `locald`; restore intentionally
+requires a clean target profile:
+
+```text
+endless backup export OUTPUT_PATH
+endless --profile-root EMPTY_PROFILE backup restore INPUT_PATH
+```

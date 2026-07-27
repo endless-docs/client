@@ -22,7 +22,10 @@ abstract interface class ClientStore {
 abstract interface class ClientStoreReader {
   Future<Workspace?> getWorkspace(String workspaceId);
 
-  Future<List<Workspace>> listWorkspaces({bool includeArchived = false});
+  Future<List<Workspace>> listWorkspaces({
+    bool includeArchived = false,
+    bool includeDeleted = false,
+  });
 
   Future<Document?> getDocument(String documentId);
 
@@ -43,6 +46,10 @@ abstract interface class ClientStoreReader {
   );
 
   Future<List<AttachmentCommitMarker>> listPendingAttachmentCommits();
+
+  Future<List<Operation>> listOperations();
+
+  Future<List<CommandOutcome>> listCommandOutcomes();
 
   Future<CommandOutcome?> getCommandOutcome(String commandId);
 
@@ -77,6 +84,8 @@ abstract interface class ClientStoreWriter implements ClientStoreReader {
   Future<void> setSearchIndexedSequence(int sequence);
 
   Future<int> nextEventSequence();
+
+  Future<void> setEventSequence(int sequence);
 
   Future<void> putCommandOutcome(CommandOutcome outcome);
 

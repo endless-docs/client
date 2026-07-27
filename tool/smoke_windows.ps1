@@ -9,7 +9,14 @@ $expectedLocald = [System.IO.Path]::GetFullPath(
 $smokeRoot = Join-Path $repositoryRoot (
     'build\smoke-profile-{0}' -f [DateTime]::UtcNow.Ticks
 )
+$restoreRoot = Join-Path $repositoryRoot (
+    'build\smoke-restore-{0}' -f [DateTime]::UtcNow.Ticks
+)
+$backupPath = Join-Path $repositoryRoot (
+    'build\smoke-backup-{0}.backup' -f [DateTime]::UtcNow.Ticks
+)
 $endpointPath = Join-Path $smokeRoot 'runtime\endpoint.json'
+$restoreEndpointPath = Join-Path $restoreRoot 'runtime\endpoint.json'
 
 function Stop-SmokeDaemon {
     param(
@@ -45,7 +52,22 @@ function Invoke-CliJson {
         [string[]] $Arguments
     )
 
-    $json = (& $cli --profile-root $smokeRoot --json @Arguments) | Out-String
+    return Invoke-CliJsonForProfile `
+        -ProfileRoot $smokeRoot `
+        -Arguments $Arguments
+}
+
+function Invoke-CliJsonForProfile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $ProfileRoot,
+        [Parameter(Mandatory = $true)]
+        [string[]] $Arguments
+    )
+
+    $json = (
+        & $cli --profile-root $ProfileRoot --json @Arguments
+    ) | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw "Bundled CLI failed: $($Arguments -join ' ')"
     }
@@ -196,6 +218,60 @@ try {
     if (-not $searchStatus.is_current -or -not $rebuilt.is_current) {
         throw 'Local search index is not current.'
     }
+    $backup = Invoke-CliJson @('backup', 'export', $backupPath)
+    if ($backup.size -le 0 -or -not (Test-Path -LiteralPath $backupPath)) {
+        throw 'Packaged backup export did not create a bounded archive.'
+    }
+    $backupRestore = Invoke-CliJsonForProfile `
+        -ProfileRoot $restoreRoot `
+        -Arguments @('backup', 'restore', $backupPath)
+    if ($backupRestore.format_version -ne 1) {
+        throw 'Packaged backup restore returned an unexpected version.'
+    }
+    $restoredSearch = @(
+        Invoke-CliJsonForProfile `
+            -ProfileRoot $restoreRoot `
+            -Arguments @(
+                'search',
+                $workspace.workspace_id,
+                'OfflineNote'
+            )
+    )
+    if ($restoredSearch.Count -ne 1) {
+        throw 'Backup restore did not rebuild local search.'
+    }
+    $restoredAttachments = @(
+        Invoke-CliJsonForProfile `
+            -ProfileRoot $restoreRoot `
+            -Arguments @(
+                'attachment',
+                'list',
+                $document.document_id
+            )
+    )
+    if ($restoredAttachments.Count -ne 1 -or
+        $restoredAttachments[0].attachment_id -ne
+        $attachment.attachment_id) {
+        throw 'Backup restore did not preserve attachment metadata.'
+    }
+    $restoredAttachmentDownload = Join-Path `
+        $restoreRoot `
+        'restored-attachment.txt'
+    $null = Invoke-CliJsonForProfile `
+        -ProfileRoot $restoreRoot `
+        -Arguments @(
+            'attachment',
+            'download',
+            $attachment.attachment_id,
+            $restoredAttachmentDownload
+        )
+    if ([System.IO.File]::ReadAllText($restoredAttachmentDownload) -ne
+        'Available without an external server') {
+        throw 'Backup restore did not preserve attachment bytes.'
+    }
+    $restoreEndpoint = Get-Content -Raw `
+        $restoreEndpointPath | ConvertFrom-Json
+    Stop-SmokeDaemon $restoreEndpoint.process_id
     Stop-SmokeDaemon $secondEndpoint.process_id
 
     [pscustomobject]@{
@@ -207,6 +283,7 @@ try {
         LocalSearch = $true
         SearchRebuild = $true
         ManagedAttachments = $true
+        BackupCleanRestore = $true
         ColdRestart = $true
         ExternalProxyBlocked = $true
         Profile = $smokeRoot
@@ -216,5 +293,10 @@ finally {
     if (Test-Path -LiteralPath $endpointPath) {
         $lastEndpoint = Get-Content -Raw $endpointPath | ConvertFrom-Json
         Stop-SmokeDaemon $lastEndpoint.process_id
+    }
+    if (Test-Path -LiteralPath $restoreEndpointPath) {
+        $lastRestoreEndpoint = Get-Content -Raw `
+            $restoreEndpointPath | ConvertFrom-Json
+        Stop-SmokeDaemon $lastRestoreEndpoint.process_id
     }
 }

@@ -13,6 +13,7 @@ workspace:
   - packages/local_api
   - packages/local_api_client
   - packages/local_attachments
+  - packages/local_backup
   - packages/persistence_isar
   - packages/platform_runtime
 

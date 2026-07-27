@@ -106,6 +106,18 @@ proof обязателен для metadata и bytes; caller filesystem paths н�
 
 Имена являются semantic inventory, а не wire schema.
 
+Текущий backup adapter использует authenticated streaming endpoints:
+
+- `GET /v1/backup/export` возвращает versioned
+  `application/vnd.endless.backup`;
+- `POST /v1/backup/restore` принимает bounded archive и разрешён только для
+  clean profile.
+
+Typed Local API client и CLI не читают Isar files и не сериализуют caller
+filesystem paths внутрь backup. Archive содержит transport-neutral snapshot и
+content-addressed attachment bytes; search/session/runtime endpoint state в него
+не входят.
+
 ## Query behavior
 
 - Large collections используют opaque page token и bounded page size.

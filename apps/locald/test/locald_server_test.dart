@@ -378,6 +378,163 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'versioned backup restores a clean profile with history, search, and files',
+    () async {
+      final Directory sourceProfile = await _temporaryProfile('backup-source');
+      final Directory targetProfile = await _temporaryProfile('backup-target');
+      addTearDown(() => _deleteProfile(sourceProfile));
+      addTearDown(() => _deleteProfile(targetProfile));
+
+      LocaldServer sourceServer = await _startLocald(sourceProfile);
+      HttpLocalApiClient sourceClient = await _clientFor(sourceServer);
+      final JsonMap workspace = await sourceClient.createWorkspace(
+        commandId: 'portable-workspace',
+        name: 'Portable',
+      );
+      final String workspaceId = requireString(workspace, 'workspace_id');
+      final JsonMap document = await sourceClient.createDocument(
+        commandId: 'portable-document',
+        workspaceId: workspaceId,
+        title: 'Offline backup',
+      );
+      final String documentId = requireString(document, 'document_id');
+      await sourceClient.saveDocument(
+        commandId: 'portable-save',
+        documentId: documentId,
+        title: 'Offline backup',
+        blocks: <JsonMap>[
+          <String, Object?>{
+            'type': 'paragraph',
+            'payload': <String, Object?>{
+              'text': 'search survives clean restore',
+            },
+          },
+        ],
+        expectedRevision: 1,
+      );
+      final JsonMap deletedDocument = await sourceClient.createDocument(
+        commandId: 'deleted-document',
+        workspaceId: workspaceId,
+        title: 'Recycle metadata',
+      );
+      await sourceClient.deleteDocument(
+        commandId: 'delete-document',
+        documentId: requireString(deletedDocument, 'document_id'),
+        expectedRevision: 1,
+      );
+      final List<int> attachmentBytes = utf8.encode(
+        'portable attachment content',
+      );
+      final JsonMap staged = await sourceClient.stageAttachment(
+        bytes: Stream<List<int>>.value(attachmentBytes),
+        fileName: 'portable.txt',
+        mediaType: 'text/plain',
+        contentLength: attachmentBytes.length,
+      );
+      final JsonMap attachment = await sourceClient.attachStagedFile(
+        commandId: 'portable-attachment',
+        documentId: documentId,
+        stagingToken: requireString(staged, 'token'),
+      );
+      final ProfileBackupDownload exported = await sourceClient.exportBackup();
+      final List<int> archiveBytes = await exported.bytes
+          .expand((List<int> chunk) => chunk)
+          .toList();
+      expect(archiveBytes, hasLength(exported.size));
+      await sourceClient.close();
+      await sourceServer.close();
+
+      LocaldServer targetServer = await _startLocald(targetProfile);
+      HttpLocalApiClient targetClient = await _clientFor(targetServer);
+      addTearDown(() async {
+        await targetClient.close();
+        await targetServer.close();
+      });
+      final List<int> corrupted = <int>[...archiveBytes]..last ^= 0xff;
+      await expectLater(
+        targetClient.restoreBackup(
+          bytes: Stream<List<int>>.value(corrupted),
+          contentLength: corrupted.length,
+        ),
+        throwsA(
+          isA<LocalApiException>().having(
+            (LocalApiException error) => error.code,
+            'code',
+            'BackupAttachmentMismatch',
+          ),
+        ),
+      );
+      expect(await targetClient.listWorkspaces(), isEmpty);
+
+      final JsonMap restored = await targetClient.restoreBackup(
+        bytes: Stream<List<int>>.value(archiveBytes),
+        contentLength: archiveBytes.length,
+      );
+      expect(restored['format_version'], 1);
+      expect(restored['workspaces'], 1);
+      expect(restored['documents'], 2);
+      expect(restored['attachments'], 1);
+      expect(
+        await targetClient.listDocuments(
+          workspaceId: workspaceId,
+          includeDeleted: true,
+        ),
+        hasLength(2),
+      );
+      expect(
+        await targetClient.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'clean restore',
+        ),
+        hasLength(1),
+      );
+      final AttachmentDownload download = await targetClient.downloadAttachment(
+        requireString(attachment, 'attachment_id'),
+      );
+      expect(
+        await download.bytes.expand((List<int> chunk) => chunk).toList(),
+        attachmentBytes,
+      );
+      final JsonMap replay = await targetClient.createWorkspace(
+        commandId: 'portable-workspace',
+        name: 'Portable',
+      );
+      expect(replay['was_replay'], isTrue);
+      expect(replay['workspace_id'], workspaceId);
+      await expectLater(
+        targetClient.restoreBackup(
+          bytes: Stream<List<int>>.value(archiveBytes),
+          contentLength: archiveBytes.length,
+        ),
+        throwsA(
+          isA<LocalApiException>().having(
+            (LocalApiException error) => error.code,
+            'code',
+            'RestoreTargetNotEmpty',
+          ),
+        ),
+      );
+
+      await targetClient.close();
+      await targetServer.close();
+      targetServer = await _startLocald(targetProfile);
+      targetClient = await _clientFor(targetServer);
+      expect(
+        await targetClient.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'survives',
+        ),
+        hasLength(1),
+      );
+      expect(
+        await targetClient.listAttachments(documentId: documentId),
+        hasLength(1),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   for (final LocaldWriteStep step in LocaldWriteStep.values) {
     test(
       'startup repairs attachment interrupted at ${step.name}',
