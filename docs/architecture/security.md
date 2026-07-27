@@ -70,6 +70,24 @@ encryption не считается принятой до отдельного р
 обещать защиту от process с полным доступом к OS user session без дополнительного
 encryption design.
 
+## Attachment filesystem controls
+
+`local_attachments` реализует filesystem foundation отдельно от application
+metadata:
+
+- caller задаёт только display file name и stream, но не final path;
+- opaque staging tokens и hash-derived final paths проходят canonical-root
+  containment checks;
+- traversal/absolute names, overlapping roots, symbolic-link content prefixes
+  и link targets отклоняются;
+- bytes проверяются по size/SHA-256 до commit и перед чтением;
+- journals публикуются через flushed temporary + atomic rename, а повреждённый
+  journal изолируется как recovery warning.
+
+Эти controls проверены adapter corpus, включая реальный Windows symlink.
+Полный trust-boundary gate остаётся открытым до подключения metadata commands и
+Local API authorization.
+
 ## Audit
 
 Security-relevant audit:

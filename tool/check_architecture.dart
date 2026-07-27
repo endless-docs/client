@@ -55,6 +55,16 @@ void main() {
         'package:client_application',
       ],
     ),
+    const _Rule(
+      root: 'packages/local_attachments',
+      forbiddenImports: <String>[
+        'package:flutter/',
+        'package:isar',
+        'package:client_domain',
+        'package:client_application',
+        'package:local_api',
+      ],
+    ),
   ];
   final List<String> violations = <String>[];
 

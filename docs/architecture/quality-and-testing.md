@@ -76,6 +76,16 @@ Real Isar and filesystem:
 - attachment paths;
 - single-owner lock.
 
+### Attachment filesystem adapter tests
+
+- bounded chunked input and partial cleanup on quota failure;
+- SHA-256 content addressing, deduplication and idempotent token replay;
+- restart recovery after durable commit intent;
+- staged and committed byte tampering;
+- traversal, invalid token/hash, overlapping-root and real symlink-prefix
+  rejection;
+- malformed journal isolation and abandoned-state cleanup.
+
 ### Local API contract tests
 
 - handshake/version negotiation;

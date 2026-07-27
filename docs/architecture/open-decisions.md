@@ -179,6 +179,24 @@ Evidence:
 
 Preferred baseline is option 1 unless evidence proves a hybrid is necessary.
 
+Implementation evidence collected:
+
+- the isolated `local_attachments` adapter writes a bounded stream to an opaque
+  staging token and calculates SHA-256 without buffering the complete payload;
+- commit intent/completion journals use flushed temporary files and atomic
+  rename; restart recovery completes a move that was interrupted after durable
+  intent, while cleanup preserves pending commits;
+- final paths are derived only from the content hash, and identical bytes
+  deduplicate;
+- the Windows test corpus rejects traversal, overlapping roots, a real
+  symbolic-link content prefix, staged/committed tampering and malformed
+  journals.
+
+This evidence supports option 1 as the current implementation baseline, but D7
+remains open until authoritative attachment metadata, command atomicity,
+backup/export behavior and representative size/performance evidence are
+implemented.
+
 ## D8 — MCP pairing and approval
 
 Status: open

@@ -58,6 +58,9 @@ Flutter UI / CLI
   legacy sentinel нормализуется, а search repair завершается до readiness;
 - deterministic real-Isar fault matrix откатывает document, block, projection,
   sequence, Operation и CommandOutcome writes и допускает safe same-ID retry;
+- isolated attachment filesystem adapter принимает bounded stream, вычисляет
+  SHA-256, атомарно ведёт staging/commit journals, deduplicate-ит content и
+  восстанавливает interrupted move без caller-provided final path;
 - release bundle содержит Flutter UI, CLI, `locald` и native Isar library;
 - packaged CLI создаёт и читает данные после forced `locald` restart при
   недоступном внешнем proxy.
@@ -71,7 +74,8 @@ Flutter UI / CLI
 ```
 
 Она запускает format check, `flutter analyze`, import-boundary checker, domain,
-application, Local API, runtime, real Isar, `locald` HTTP и Flutter widget tests.
+application, Local API, attachment filesystem, runtime, real Isar, `locald`
+HTTP и Flutter widget tests.
 
 Сборка self-contained Windows bundle:
 
@@ -99,6 +103,7 @@ rebuild.
 | Operation atomicity | Real Isar fault injection at document/block/projection/sequence/operation/outcome writes plus durable retry after reopen | Proven for injected exceptions; process-kill-during-commit evidence pending |
 | Offline editor recovery | Autosave, flush-before-navigation, exit-request flush and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
 | Rebuildable local search | Application update/delete/restore/rebuild tests, real Isar/locald post-upgrade repair and cold-reopen tests, widget result UX and packaged smoke | Proven for correctness; 10k/100k benchmark and D6 decision pending |
+| Managed attachment bytes | Bounded streaming/SHA-256, deduplication, interrupted-commit recovery, tamper/traversal and real symlink-prefix adapter tests | Foundation proven; metadata transaction, Local API/UI, backup/export and D7 decision pending |
 | Release build | Windows release bundle build script | Proven; installer/signing not implemented |
 
 ## Known gaps
@@ -106,7 +111,8 @@ rebuild.
 Полная Client MVP пока не достигнута. Обязательные следующие work packages:
 
 1. Multi-block editor после решения D5.
-2. Managed attachments со staging journal и traversal/symlink corpus.
+2. Attachment metadata transaction, Local API/UI and backup/export integration
+   поверх проверенного managed-filesystem adapter.
 3. Versioned import/export и backup/restore с clean-profile round trip.
 4. MCP adapter, scopes, approval и audit.
 5. Event subscription/reconnect и multi-client concurrency.

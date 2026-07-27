@@ -82,6 +82,13 @@ Bytes хранятся в managed filesystem:
 Все resolved paths должны оставаться внутри canonical attachment root. Symlinks,
 path traversal и caller-provided final paths запрещены.
 
+Текущий `local_attachments` adapter доказывает bounded streaming, SHA-256
+content addressing/deduplication, атомарные intent/completion journals,
+interrupted-move recovery, abandoned-staging cleanup и filesystem security
+corpus. Он намеренно не фиксирует authoritative metadata: связывание hash с
+document/block и recovery marker в Isar остаётся следующим application/
+persistence increment.
+
 ## Schema versioning
 
 - Isar schema version — monotonic integer.

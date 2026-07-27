@@ -12,6 +12,7 @@ workspace:
   - packages/client_domain
   - packages/local_api
   - packages/local_api_client
+  - packages/local_attachments
   - packages/persistence_isar
   - packages/platform_runtime
 

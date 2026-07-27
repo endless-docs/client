@@ -30,6 +30,7 @@ try {
         'packages\client_domain',
         'packages\client_application',
         'packages\local_api',
+        'packages\local_attachments',
         'packages\platform_runtime'
     )) {
         Push-Location (Join-Path $repositoryRoot $package)
