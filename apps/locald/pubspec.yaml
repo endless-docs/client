@@ -1,0 +1,21 @@
+name: locald
+description: Endless Docs local application and persistence daemon.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+resolution: workspace
+
+dependencies:
+  client_application: any
+  client_domain: any
+  local_api: any
+  persistence_isar: any
+  platform_runtime: any
+
+dev_dependencies:
+  local_api_client: any
+  lints: ^6.0.0
+  test: ^1.25.6

@@ -1,0 +1,9 @@
+{
+  "product": "Endless Docs",
+  "client_version": "0.1.0",
+  "local_api_version": "1.0",
+  "isar_schema_version": 1,
+  "document_format_version": 1,
+  "operation_format_version": 1,
+  "platform": "windows-x64"
+}

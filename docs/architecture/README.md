@@ -76,6 +76,7 @@ cross-repository machine-readable contracts или общесистемными 
 | [Delivery plan](delivery-plan.md) | Work packages C0–C8 |
 | [Traceability](traceability.md) | Связь с system ADR и contracts |
 | [Open decisions](open-decisions.md) | Решения, которые нельзя выдумывать |
+| [Implementation status](implementation-status.md) | Текущие evidence, команды проверки и gaps |
 
 ## Правило изменения
 

@@ -1,0 +1,16 @@
+name: client_application
+description: Endless Docs application commands, queries, and ports.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+resolution: workspace
+
+dependencies:
+  client_domain: any
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

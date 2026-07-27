@@ -1,0 +1,10 @@
+.dart_tool/
+.idea/
+.packages
+build/
+coverage/
+*.iml
+*.isar
+*.isar.lock
+*.log
+dist/

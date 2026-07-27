@@ -1,0 +1,17 @@
+name: local_api_client
+description: Typed Endless Docs Local API client.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+resolution: workspace
+
+dependencies:
+  http: ^1.6.0
+  local_api: any
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

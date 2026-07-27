@@ -33,6 +33,13 @@ Evidence:
 - keyboard/accessibility behavior;
 - CI runner availability.
 
+Implementation evidence collected:
+
+- Windows x64 Flutter release bundle builds successfully in the current
+  toolchain;
+- packaged UI, CLI and `locald` binaries are produced together;
+- macOS/Linux parity and CI availability remain unverified.
+
 ## D2 — Public client license
 
 Status: open
@@ -73,6 +80,13 @@ Evidence:
 
 Boundary that cannot change: `locald` remains the single storage owner.
 
+Implementation evidence collected:
+
+- pure Dart `locald.exe` opens bundled Isar Core without runtime download;
+- Isar close/reopen and forced process restart preserve committed records;
+- current result supports option 1 on Windows x64, but other accepted platforms
+  remain unverified.
+
 ## D4 — Local API transport and encoding
 
 Status: open
@@ -93,6 +107,15 @@ Evidence:
 - startup/discovery;
 - generated code and compatibility;
 - attack surface.
+
+Implementation evidence collected:
+
+- a transport-neutral typed client is exercised over authenticated loopback
+  HTTP for the vertical slice;
+- endpoint binds only `127.0.0.1`, enforces a bounded request and direct proxy
+  bypass;
+- this is fallback evidence, not an accepted replacement for the pending
+  named-pipe/platform-socket threat review.
 
 ## D5 — Initial block types
 

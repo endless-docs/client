@@ -1,0 +1,20 @@
+name: endless_client_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+workspace:
+  - apps/endless_app
+  - apps/endless_cli
+  - apps/locald
+  - packages/client_application
+  - packages/client_domain
+  - packages/local_api
+  - packages/local_api_client
+  - packages/persistence_isar
+  - packages/platform_runtime
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6

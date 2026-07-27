@@ -7,6 +7,40 @@
 данные хранятся в Isar, но базой владеет только `locald`. Flutter UI, MCP server
 и CLI работают через один versioned Local API.
 
+## Текущее состояние
+
+Реализован проверяемый Windows-first vertical slice:
+
+- Flutter UI создаёт local workspaces и documents, редактирует текст и показывает
+  состояния autosave/retry/conflict;
+- отдельный pure Dart process `locald` — единственный владелец Isar;
+- UI и CLI подключаются через authenticated Local API на `127.0.0.1`;
+- domain mutation, command outcome, Operation Log и event sequence фиксируются
+  одной durable Isar transaction;
+- собранный Windows bundle включает `locald.exe` и `isar.dll`, поэтому runtime не
+  скачивает компоненты и не требует внешнего сервера;
+- cold restart, duplicate `command_id`, unauthorized request, architecture
+  boundaries и Flutter states покрыты автоматическими тестами.
+
+Полная матрица реализованного и ещё необходимого находится в
+[implementation status](docs/architecture/implementation-status.md).
+
+## Разработка и проверка
+
+Требуются Flutter 3.38+/Dart 3.10+ и Windows C++ build tools.
+
+```powershell
+dart pub get
+.\tool\verify.ps1
+.\tool\build_windows.ps1
+.\tool\smoke_windows.ps1
+```
+
+Release bundle создаётся в `dist/endless-windows-x64`. Запуск
+`endless_app.exe` автоматически обнаруживает или поднимает bundled `locald`.
+Для изолированного development/smoke profile можно задать
+`ENDLESS_PROFILE_ROOT` абсолютным путём внутри рабочего окружения.
+
 ## Архитектура
 
 Клиентская архитектура находится в
@@ -25,6 +59,7 @@
 - [delivery plan](docs/architecture/delivery-plan.md);
 - [traceability](docs/architecture/traceability.md);
 - [open decisions](docs/architecture/open-decisions.md).
+- [implementation status](docs/architecture/implementation-status.md).
 
 ## Неподвижные ограничения
 
