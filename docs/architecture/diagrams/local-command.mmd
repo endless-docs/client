@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    actor Caller as UI / MCP / CLI
+    box rgb(235,245,255) Local API boundary
+        participant Auth as Session and scope
+        participant API as Local API host
+    end
+    box rgb(240,255,240) locald application boundary
+        participant App as Command handler
+        participant Domain as Domain model
+        participant DB as Isar
+        participant Events as Event publisher
+    end
+
+    Caller->>Auth: Command request_id and command_id
+    Auth->>API: Authenticated request
+    API->>App: Validated command DTO
+    App->>DB: Lookup command outcome
+    alt Previously committed command
+        DB-->>App: Stored outcome
+    else New command
+        App->>Domain: Evaluate transition
+        Domain-->>App: New state and logical operation
+        App->>DB: Atomic state plus outcome plus operation plus sequence
+        DB-->>App: Commit
+        App-->>Events: Publish committed event asynchronously
+    end
+    App-->>API: Durable outcome
+    API-->>Caller: Result revision or stable error
+    Note over Caller,Events: Owner locald, auth Local API session and scope, storage Isar, external cloud systems none, async committed event

@@ -1,0 +1,38 @@
+flowchart LR
+    discover["Discover protected endpoint"]
+    handshake["Handshake and version check"]
+    startLock["Acquire process-start lock"]
+    spawn["Spawn bundled locald"]
+    ownerLock["Acquire profile owner lock"]
+    recover["Recover staging and migration state"]
+    migrate["Apply required Isar migrations"]
+    ready["Publish endpoint and ready state"]
+    serve["Serve authenticated Local API"]
+    drain["Stop accepting writes and drain"]
+    close["Close Isar and release locks"]
+    failure["Stable startup/recovery error"]
+
+    discover --> handshake
+    handshake -->|Compatible daemon exists| serve
+    handshake -->|No endpoint| startLock
+    startLock --> spawn
+    spawn --> ownerLock
+    ownerLock -->|Acquired| recover
+    ownerLock -->|Already owned| failure
+    recover -->|Valid or repaired| migrate
+    recover -->|Integrity failure| failure
+    migrate -->|Success| ready
+    migrate -->|Restore required| failure
+    ready --> serve
+    serve -->|Graceful shutdown| drain
+    drain --> close
+    serve -->|Crash| discover
+
+    subgraph storage["Storage owned only after profile lock"]
+        isar[("Isar")]
+        files[("Managed files")]
+    end
+
+    recover --> storage
+    migrate --> isar
+    serve --> storage

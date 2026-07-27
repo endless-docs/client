@@ -1,0 +1,31 @@
+flowchart LR
+    user["User"]
+    mcpCaller["External local MCP client"]
+    script["External shell/automation"]
+
+    subgraph device["Trust boundary: OS user device"]
+        ui["Flutter UI process<br/>Presentation only"]
+        mcp["MCP server process<br/>Scoped adapter"]
+        cli["CLI process<br/>Automation adapter"]
+        endpoint["Authenticated Local API endpoint"]
+        daemon["locald process<br/>Owner: local state"]
+        isar[("Isar profile<br/>Documents + Operation Log")]
+        files[("Managed files<br/>Attachments + backups")]
+        runtime[("Protected runtime<br/>Lock + session")]
+
+        ui --> endpoint
+        mcp --> endpoint
+        cli --> endpoint
+        endpoint --> daemon
+        daemon --> isar
+        daemon --> files
+        daemon --> runtime
+        daemon -. "async committed events" .-> ui
+        daemon -. "async committed events" .-> mcp
+    end
+
+    user --> ui
+    mcpCaller --> mcp
+    script --> cli
+    note["Client MVP external cloud systems: none"]
+    device --> note

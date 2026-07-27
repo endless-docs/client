@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    participant Tool as External MCP client
+    box rgb(255,245,235) MCP boundary
+        participant MCP as MCP server
+        participant Grant as Scope and confirmation
+    end
+    box rgb(235,245,255) Local API boundary
+        participant API as Local API client and host
+    end
+    box rgb(240,255,240) locald ownership boundary
+        participant App as Application command
+        participant DB as Isar
+        participant Audit as Audit projection
+    end
+
+    Tool->>MCP: Invoke mutating tool
+    MCP->>Grant: Check client workspace and action scope
+    alt Destructive confirmation required
+        Grant-->>MCP: Obtain explicit approval
+    end
+    MCP->>API: Command with stable command_id
+    API->>App: Authenticated typed command
+    App->>DB: Atomic domain and operation commit
+    DB-->>App: Durable outcome
+    App-->>Audit: Record invocation outcome asynchronously
+    App-->>API: Revision and result
+    API-->>MCP: Typed response
+    MCP-->>Tool: MCP result
+    Note over Tool,Audit: Owner locald, auth MCP grant and Local API, storage Isar and audit, external MCP client, async audit

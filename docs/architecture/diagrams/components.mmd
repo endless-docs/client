@@ -1,0 +1,38 @@
+flowchart TB
+    subgraph callers["Caller adapters"]
+        presentation["Flutter Presentation"]
+        mcp["MCP adapter"]
+        cli["CLI adapter"]
+    end
+
+    apiClient["Local API client<br/>Typed calls + reconnect"]
+
+    subgraph daemon["locald trust boundary"]
+        apiHost["Local API host<br/>Authentication + validation"]
+        app["Application services<br/>Commands + queries + transactions"]
+        domain["Domain<br/>Entities + invariants + operations"]
+        ports["Ports<br/>Persistence + search + attachments + audit"]
+        isarAdapter["Isar adapter"]
+        search["Search adapter"]
+        attachments["Attachment adapter"]
+        observability["Redacted observability"]
+        db[("Isar<br/>Owner: locald")]
+        fs[("Managed filesystem<br/>Owner: locald")]
+
+        apiHost --> app
+        app --> domain
+        app --> ports
+        ports --> isarAdapter
+        ports --> search
+        ports --> attachments
+        ports --> observability
+        isarAdapter --> db
+        search --> db
+        attachments --> fs
+    end
+
+    presentation --> apiClient
+    mcp --> apiClient
+    cli --> apiClient
+    apiClient --> apiHost
+    app -. "async events after commit" .-> apiHost
