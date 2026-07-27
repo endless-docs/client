@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:client_domain/client_domain.dart';
 
+import 'search.dart';
+
 abstract interface class Clock {
   DateTime now();
 }
@@ -29,12 +31,30 @@ abstract interface class ClientStoreReader {
   });
 
   Future<CommandOutcome?> getCommandOutcome(String commandId);
+
+  Future<List<SearchHit>> searchDocuments(
+    String workspaceId,
+    String query, {
+    required int limit,
+  });
+
+  Future<SearchStatus> getSearchStatus();
+
+  Future<int> currentEventSequence();
 }
 
 abstract interface class ClientStoreWriter implements ClientStoreReader {
   Future<void> putWorkspace(Workspace workspace);
 
   Future<void> putDocument(Document document);
+
+  Future<void> putSearchProjection(SearchProjection projection);
+
+  Future<void> removeSearchProjection(String documentId);
+
+  Future<void> replaceSearchProjections(List<SearchProjection> projections);
+
+  Future<void> setSearchIndexedSequence(int sequence);
 
   Future<int> nextEventSequence();
 

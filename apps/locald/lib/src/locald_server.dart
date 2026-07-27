@@ -73,6 +73,7 @@ final class LocaldServer {
         httpServer: server,
         sessionProof: proof,
       );
+      await locald._application.ensureSearchIndex();
       locald._requests = server.listen(locald._handleRequest);
       await paths.writeEndpoint(
         EndpointManifest(
@@ -236,7 +237,13 @@ final class LocaldServer {
       'api_version': localApiVersion,
       'locald_version': componentVersion,
       'profile_id': paths.profileId,
-      'capabilities': <String>['documents', 'offline', 'command_deduplication'],
+      'capabilities': <String>[
+        'documents',
+        'offline',
+        'command_deduplication',
+        'search',
+        'search_rebuild',
+      ],
       'compatibility': 'compatible',
     };
   }
@@ -260,6 +267,16 @@ final class LocaldServer {
       'GetDocument' => (await _application.getDocument(
         requireString(payload, 'document_id'),
       )).toJson(),
+      'SearchDocuments' => <String, Object?>{
+        'results': (await _application.searchDocuments(
+          workspaceId: requireString(payload, 'workspace_id'),
+          query: requireString(payload, 'query'),
+          limit: payload.containsKey('limit')
+              ? requireInt(payload, 'limit')
+              : 50,
+        )).map((SearchHit hit) => hit.toJson()).toList(),
+      },
+      'GetSearchStatus' => (await _application.getSearchStatus()).toJson(),
       _ => throw const _HttpApiError(
         status: HttpStatus.notFound,
         error: LocalApiException(
@@ -316,6 +333,9 @@ final class LocaldServer {
         commandId: commandId,
         documentId: requireString(payload, 'document_id'),
         expectedRevision: payload['expected_revision'] as int?,
+      ),
+      'RebuildSearchIndex' => await _application.rebuildSearchIndex(
+        commandId: commandId,
       ),
       _ => throw const _HttpApiError(
         status: HttpStatus.notFound,

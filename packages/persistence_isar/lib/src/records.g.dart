@@ -7874,6 +7874,1828 @@ extension OperationRecordQueryProperty
 // coverage:ignore-file
 // ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
 
+extension GetSearchProjectionRecordCollection on Isar {
+  IsarCollection<SearchProjectionRecord> get searchProjectionRecords =>
+      this.collection();
+}
+
+const SearchProjectionRecordSchema = CollectionSchema(
+  name: r'SearchProjectionRecord',
+  id: 6094677479976271722,
+  properties: {
+    r'content': PropertySchema(id: 0, name: r'content', type: IsarType.string),
+    r'documentId': PropertySchema(
+      id: 1,
+      name: r'documentId',
+      type: IsarType.string,
+    ),
+    r'normalizedText': PropertySchema(
+      id: 2,
+      name: r'normalizedText',
+      type: IsarType.string,
+    ),
+    r'revision': PropertySchema(id: 3, name: r'revision', type: IsarType.long),
+    r'title': PropertySchema(id: 4, name: r'title', type: IsarType.string),
+    r'workspaceId': PropertySchema(
+      id: 5,
+      name: r'workspaceId',
+      type: IsarType.string,
+    ),
+  },
+
+  estimateSize: _searchProjectionRecordEstimateSize,
+  serialize: _searchProjectionRecordSerialize,
+  deserialize: _searchProjectionRecordDeserialize,
+  deserializeProp: _searchProjectionRecordDeserializeProp,
+  idName: r'id',
+  indexes: {
+    r'documentId': IndexSchema(
+      id: 4187168439921340405,
+      name: r'documentId',
+      unique: true,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'documentId',
+          type: IndexType.hash,
+          caseSensitive: true,
+        ),
+      ],
+    ),
+    r'workspaceId': IndexSchema(
+      id: 4360577223095013563,
+      name: r'workspaceId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'workspaceId',
+          type: IndexType.hash,
+          caseSensitive: true,
+        ),
+      ],
+    ),
+  },
+  links: {},
+  embeddedSchemas: {},
+
+  getId: _searchProjectionRecordGetId,
+  getLinks: _searchProjectionRecordGetLinks,
+  attach: _searchProjectionRecordAttach,
+  version: '3.3.2',
+);
+
+int _searchProjectionRecordEstimateSize(
+  SearchProjectionRecord object,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  var bytesCount = offsets.last;
+  bytesCount += 3 + object.content.length * 3;
+  bytesCount += 3 + object.documentId.length * 3;
+  bytesCount += 3 + object.normalizedText.length * 3;
+  bytesCount += 3 + object.title.length * 3;
+  bytesCount += 3 + object.workspaceId.length * 3;
+  return bytesCount;
+}
+
+void _searchProjectionRecordSerialize(
+  SearchProjectionRecord object,
+  IsarWriter writer,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  writer.writeString(offsets[0], object.content);
+  writer.writeString(offsets[1], object.documentId);
+  writer.writeString(offsets[2], object.normalizedText);
+  writer.writeLong(offsets[3], object.revision);
+  writer.writeString(offsets[4], object.title);
+  writer.writeString(offsets[5], object.workspaceId);
+}
+
+SearchProjectionRecord _searchProjectionRecordDeserialize(
+  Id id,
+  IsarReader reader,
+  List<int> offsets,
+  Map<Type, List<int>> allOffsets,
+) {
+  final object = SearchProjectionRecord();
+  object.content = reader.readString(offsets[0]);
+  object.documentId = reader.readString(offsets[1]);
+  object.id = id;
+  object.normalizedText = reader.readString(offsets[2]);
+  object.revision = reader.readLong(offsets[3]);
+  object.title = reader.readString(offsets[4]);
+  object.workspaceId = reader.readString(offsets[5]);
+  return object;
+}
+
+P _searchProjectionRecordDeserializeProp<P>(
+  IsarReader reader,
+  int propertyId,
+  int offset,
+  Map<Type, List<int>> allOffsets,
+) {
+  switch (propertyId) {
+    case 0:
+      return (reader.readString(offset)) as P;
+    case 1:
+      return (reader.readString(offset)) as P;
+    case 2:
+      return (reader.readString(offset)) as P;
+    case 3:
+      return (reader.readLong(offset)) as P;
+    case 4:
+      return (reader.readString(offset)) as P;
+    case 5:
+      return (reader.readString(offset)) as P;
+    default:
+      throw IsarError('Unknown property with id $propertyId');
+  }
+}
+
+Id _searchProjectionRecordGetId(SearchProjectionRecord object) {
+  return object.id;
+}
+
+List<IsarLinkBase<dynamic>> _searchProjectionRecordGetLinks(
+  SearchProjectionRecord object,
+) {
+  return [];
+}
+
+void _searchProjectionRecordAttach(
+  IsarCollection<dynamic> col,
+  Id id,
+  SearchProjectionRecord object,
+) {
+  object.id = id;
+}
+
+extension SearchProjectionRecordByIndex
+    on IsarCollection<SearchProjectionRecord> {
+  Future<SearchProjectionRecord?> getByDocumentId(String documentId) {
+    return getByIndex(r'documentId', [documentId]);
+  }
+
+  SearchProjectionRecord? getByDocumentIdSync(String documentId) {
+    return getByIndexSync(r'documentId', [documentId]);
+  }
+
+  Future<bool> deleteByDocumentId(String documentId) {
+    return deleteByIndex(r'documentId', [documentId]);
+  }
+
+  bool deleteByDocumentIdSync(String documentId) {
+    return deleteByIndexSync(r'documentId', [documentId]);
+  }
+
+  Future<List<SearchProjectionRecord?>> getAllByDocumentId(
+    List<String> documentIdValues,
+  ) {
+    final values = documentIdValues.map((e) => [e]).toList();
+    return getAllByIndex(r'documentId', values);
+  }
+
+  List<SearchProjectionRecord?> getAllByDocumentIdSync(
+    List<String> documentIdValues,
+  ) {
+    final values = documentIdValues.map((e) => [e]).toList();
+    return getAllByIndexSync(r'documentId', values);
+  }
+
+  Future<int> deleteAllByDocumentId(List<String> documentIdValues) {
+    final values = documentIdValues.map((e) => [e]).toList();
+    return deleteAllByIndex(r'documentId', values);
+  }
+
+  int deleteAllByDocumentIdSync(List<String> documentIdValues) {
+    final values = documentIdValues.map((e) => [e]).toList();
+    return deleteAllByIndexSync(r'documentId', values);
+  }
+
+  Future<Id> putByDocumentId(SearchProjectionRecord object) {
+    return putByIndex(r'documentId', object);
+  }
+
+  Id putByDocumentIdSync(
+    SearchProjectionRecord object, {
+    bool saveLinks = true,
+  }) {
+    return putByIndexSync(r'documentId', object, saveLinks: saveLinks);
+  }
+
+  Future<List<Id>> putAllByDocumentId(List<SearchProjectionRecord> objects) {
+    return putAllByIndex(r'documentId', objects);
+  }
+
+  List<Id> putAllByDocumentIdSync(
+    List<SearchProjectionRecord> objects, {
+    bool saveLinks = true,
+  }) {
+    return putAllByIndexSync(r'documentId', objects, saveLinks: saveLinks);
+  }
+}
+
+extension SearchProjectionRecordQueryWhereSort
+    on QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QWhere> {
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterWhere>
+  anyId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(const IdWhereClause.any());
+    });
+  }
+}
+
+extension SearchProjectionRecordQueryWhere
+    on
+        QueryBuilder<
+          SearchProjectionRecord,
+          SearchProjectionRecord,
+          QWhereClause
+        > {
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  idEqualTo(Id id) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IdWhereClause.between(lower: id, upper: id));
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  idNotEqualTo(Id id) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IdWhereClause.lessThan(upper: id, includeUpper: false),
+            )
+            .addWhereClause(
+              IdWhereClause.greaterThan(lower: id, includeLower: false),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IdWhereClause.greaterThan(lower: id, includeLower: false),
+            )
+            .addWhereClause(
+              IdWhereClause.lessThan(upper: id, includeUpper: false),
+            );
+      }
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  idGreaterThan(Id id, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.greaterThan(lower: id, includeLower: include),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  idLessThan(Id id, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.lessThan(upper: id, includeUpper: include),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  idBetween(
+    Id lowerId,
+    Id upperId, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IdWhereClause.between(
+          lower: lowerId,
+          includeLower: includeLower,
+          upper: upperId,
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  documentIdEqualTo(String documentId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(indexName: r'documentId', value: [documentId]),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  documentIdNotEqualTo(String documentId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'documentId',
+                lower: [],
+                upper: [documentId],
+                includeUpper: false,
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'documentId',
+                lower: [documentId],
+                includeLower: false,
+                upper: [],
+              ),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'documentId',
+                lower: [documentId],
+                includeLower: false,
+                upper: [],
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'documentId',
+                lower: [],
+                upper: [documentId],
+                includeUpper: false,
+              ),
+            );
+      }
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  workspaceIdEqualTo(String workspaceId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(
+          indexName: r'workspaceId',
+          value: [workspaceId],
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterWhereClause
+  >
+  workspaceIdNotEqualTo(String workspaceId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'workspaceId',
+                lower: [],
+                upper: [workspaceId],
+                includeUpper: false,
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'workspaceId',
+                lower: [workspaceId],
+                includeLower: false,
+                upper: [],
+              ),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'workspaceId',
+                lower: [workspaceId],
+                includeLower: false,
+                upper: [],
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'workspaceId',
+                lower: [],
+                upper: [workspaceId],
+                includeUpper: false,
+              ),
+            );
+      }
+    });
+  }
+}
+
+extension SearchProjectionRecordQueryFilter
+    on
+        QueryBuilder<
+          SearchProjectionRecord,
+          SearchProjectionRecord,
+          QFilterCondition
+        > {
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentEqualTo(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'content',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'content',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'content',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'content',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentStartsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'content',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentEndsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'content',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'content',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'content',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'content', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  contentIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'content', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdEqualTo(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'documentId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'documentId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'documentId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'documentId',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdStartsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'documentId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdEndsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'documentId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'documentId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'documentId',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'documentId', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  documentIdIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'documentId', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  idEqualTo(Id value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'id', value: value),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  idGreaterThan(Id value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'id',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  idLessThan(Id value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'id',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  idBetween(
+    Id lower,
+    Id upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'id',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextEqualTo(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'normalizedText',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'normalizedText',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'normalizedText',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'normalizedText',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextStartsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'normalizedText',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextEndsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'normalizedText',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'normalizedText',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'normalizedText',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'normalizedText', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  normalizedTextIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'normalizedText', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  revisionEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'revision', value: value),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  revisionGreaterThan(int value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'revision',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  revisionLessThan(int value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'revision',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  revisionBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'revision',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleEqualTo(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'title',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'title',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'title',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'title',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleStartsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'title',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleEndsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'title',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'title',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'title',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'title', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  titleIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'title', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdEqualTo(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'workspaceId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'workspaceId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'workspaceId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'workspaceId',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdStartsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.startsWith(
+          property: r'workspaceId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdEndsWith(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.endsWith(
+          property: r'workspaceId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.contains(
+          property: r'workspaceId',
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.matches(
+          property: r'workspaceId',
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'workspaceId', value: ''),
+      );
+    });
+  }
+
+  QueryBuilder<
+    SearchProjectionRecord,
+    SearchProjectionRecord,
+    QAfterFilterCondition
+  >
+  workspaceIdIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(property: r'workspaceId', value: ''),
+      );
+    });
+  }
+}
+
+extension SearchProjectionRecordQueryObject
+    on
+        QueryBuilder<
+          SearchProjectionRecord,
+          SearchProjectionRecord,
+          QFilterCondition
+        > {}
+
+extension SearchProjectionRecordQueryLinks
+    on
+        QueryBuilder<
+          SearchProjectionRecord,
+          SearchProjectionRecord,
+          QFilterCondition
+        > {}
+
+extension SearchProjectionRecordQuerySortBy
+    on QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QSortBy> {
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByContent() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'content', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByContentDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'content', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByDocumentId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'documentId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByDocumentIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'documentId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByNormalizedText() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'normalizedText', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByNormalizedTextDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'normalizedText', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByRevision() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'revision', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByRevisionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'revision', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByTitle() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'title', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByTitleDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'title', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByWorkspaceId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'workspaceId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  sortByWorkspaceIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'workspaceId', Sort.desc);
+    });
+  }
+}
+
+extension SearchProjectionRecordQuerySortThenBy
+    on
+        QueryBuilder<
+          SearchProjectionRecord,
+          SearchProjectionRecord,
+          QSortThenBy
+        > {
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByContent() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'content', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByContentDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'content', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByDocumentId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'documentId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByDocumentIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'documentId', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenById() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'id', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'id', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByNormalizedText() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'normalizedText', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByNormalizedTextDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'normalizedText', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByRevision() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'revision', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByRevisionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'revision', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByTitle() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'title', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByTitleDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'title', Sort.desc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByWorkspaceId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'workspaceId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QAfterSortBy>
+  thenByWorkspaceIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'workspaceId', Sort.desc);
+    });
+  }
+}
+
+extension SearchProjectionRecordQueryWhereDistinct
+    on QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct> {
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct>
+  distinctByContent({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'content', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct>
+  distinctByDocumentId({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'documentId', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct>
+  distinctByNormalizedText({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(
+        r'normalizedText',
+        caseSensitive: caseSensitive,
+      );
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct>
+  distinctByRevision() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'revision');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct>
+  distinctByTitle({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'title', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, SearchProjectionRecord, QDistinct>
+  distinctByWorkspaceId({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'workspaceId', caseSensitive: caseSensitive);
+    });
+  }
+}
+
+extension SearchProjectionRecordQueryProperty
+    on
+        QueryBuilder<
+          SearchProjectionRecord,
+          SearchProjectionRecord,
+          QQueryProperty
+        > {
+  QueryBuilder<SearchProjectionRecord, int, QQueryOperations> idProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'id');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, String, QQueryOperations>
+  contentProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'content');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, String, QQueryOperations>
+  documentIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'documentId');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, String, QQueryOperations>
+  normalizedTextProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'normalizedText');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, int, QQueryOperations>
+  revisionProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'revision');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, String, QQueryOperations>
+  titleProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'title');
+    });
+  }
+
+  QueryBuilder<SearchProjectionRecord, String, QQueryOperations>
+  workspaceIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'workspaceId');
+    });
+  }
+}
+
+// coverage:ignore-file
+// ignore_for_file: duplicate_ignore, non_constant_identifier_names, constant_identifier_names, invalid_use_of_protected_member, unnecessary_cast, prefer_const_constructors, lines_longer_than_80_chars, require_trailing_commas, inference_failure_on_function_invocation, unnecessary_parenthesis, unnecessary_raw_strings, unnecessary_null_checks, join_return_with_assignment, prefer_final_locals, avoid_js_rounded_ints, avoid_positional_boolean_parameters, always_specify_types
+
 extension GetRuntimeStateRecordCollection on Isar {
   IsarCollection<RuntimeStateRecord> get runtimeStateRecords =>
       this.collection();
@@ -7886,6 +9708,11 @@ const RuntimeStateRecordSchema = CollectionSchema(
     r'eventSequence': PropertySchema(
       id: 0,
       name: r'eventSequence',
+      type: IsarType.long,
+    ),
+    r'searchIndexedSequence': PropertySchema(
+      id: 1,
+      name: r'searchIndexedSequence',
       type: IsarType.long,
     ),
   },
@@ -7921,6 +9748,7 @@ void _runtimeStateRecordSerialize(
   Map<Type, List<int>> allOffsets,
 ) {
   writer.writeLong(offsets[0], object.eventSequence);
+  writer.writeLong(offsets[1], object.searchIndexedSequence);
 }
 
 RuntimeStateRecord _runtimeStateRecordDeserialize(
@@ -7932,6 +9760,7 @@ RuntimeStateRecord _runtimeStateRecordDeserialize(
   final object = RuntimeStateRecord();
   object.eventSequence = reader.readLong(offsets[0]);
   object.id = id;
+  object.searchIndexedSequence = reader.readLong(offsets[1]);
   return object;
 }
 
@@ -7943,6 +9772,8 @@ P _runtimeStateRecordDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
+      return (reader.readLong(offset)) as P;
+    case 1:
       return (reader.readLong(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -8157,6 +9988,64 @@ extension RuntimeStateRecordQueryFilter
       );
     });
   }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterFilterCondition>
+  searchIndexedSequenceEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(
+          property: r'searchIndexedSequence',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterFilterCondition>
+  searchIndexedSequenceGreaterThan(int value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'searchIndexedSequence',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterFilterCondition>
+  searchIndexedSequenceLessThan(int value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'searchIndexedSequence',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterFilterCondition>
+  searchIndexedSequenceBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'searchIndexedSequence',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
 }
 
 extension RuntimeStateRecordQueryObject
@@ -8178,6 +10067,20 @@ extension RuntimeStateRecordQuerySortBy
   sortByEventSequenceDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'eventSequence', Sort.desc);
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterSortBy>
+  sortBySearchIndexedSequence() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'searchIndexedSequence', Sort.asc);
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterSortBy>
+  sortBySearchIndexedSequenceDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'searchIndexedSequence', Sort.desc);
     });
   }
 }
@@ -8211,6 +10114,20 @@ extension RuntimeStateRecordQuerySortThenBy
       return query.addSortBy(r'id', Sort.desc);
     });
   }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterSortBy>
+  thenBySearchIndexedSequence() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'searchIndexedSequence', Sort.asc);
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QAfterSortBy>
+  thenBySearchIndexedSequenceDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'searchIndexedSequence', Sort.desc);
+    });
+  }
 }
 
 extension RuntimeStateRecordQueryWhereDistinct
@@ -8219,6 +10136,13 @@ extension RuntimeStateRecordQueryWhereDistinct
   distinctByEventSequence() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'eventSequence');
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, RuntimeStateRecord, QDistinct>
+  distinctBySearchIndexedSequence() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'searchIndexedSequence');
     });
   }
 }
@@ -8235,6 +10159,13 @@ extension RuntimeStateRecordQueryProperty
   eventSequenceProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'eventSequence');
+    });
+  }
+
+  QueryBuilder<RuntimeStateRecord, int, QQueryOperations>
+  searchIndexedSequenceProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'searchIndexedSequence');
     });
   }
 }

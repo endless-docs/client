@@ -28,6 +28,7 @@ Flutter UI / CLI
        command outcome
        Operation Log
        event sequence
+       rebuildable search projection + indexed sequence
 ```
 
 Подтверждённые свойства:
@@ -47,6 +48,10 @@ Flutter UI / CLI
   исходный `command_id`;
 - document tree move и subtree delete/recycle/ordered restore проходят через тот
   же application pipeline;
+- search projection обновляется в domain transaction, исключает tombstones,
+  возвращает indexed sequence и перестраивается из authoritative documents;
+- schema v1→v2 post-upgrade state без projection автоматически repair-ится до
+  публикации `locald` endpoint; сценарий воспроизводится на real Isar profile;
 - release bundle содержит Flutter UI, CLI, `locald` и native Isar library;
 - packaged CLI создаёт и читает данные после forced `locald` restart при
   недоступном внешнем proxy.
@@ -72,7 +77,8 @@ application, Local API, runtime, real Isar, `locald` HTTP и Flutter widget test
 Bundle появляется в `dist/endless-windows-x64`. Isar native library загружается
 только как build input и включается рядом с `locald.exe`; runtime download
 отсутствует. Smoke блокирует внешний proxy, создаёт данные packaged CLI,
-принудительно завершает bundled `locald` и проверяет чтение после cold restart.
+  принудительно завершает bundled `locald` и проверяет чтение и local search
+  после cold restart, затем выполняет search rebuild.
 
 ## Acceptance evidence
 
@@ -85,6 +91,7 @@ Bundle появляется в `dist/endless-windows-x64`. Isar native library �
 | Command idempotency | Application and `locald` replay tests | Proven |
 | Operation atomicity | Same Isar transaction adapter + rollback/replay tests | Partial: additional write-step fault injection required |
 | Offline editor recovery | Autosave, flush-before-navigation and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
+| Rebuildable local search | Application update/delete/restore/rebuild tests, real Isar/locald post-upgrade repair and cold-reopen tests, widget result UX and packaged smoke | Proven for correctness; 10k/100k benchmark and D6 decision pending |
 | Release build | Windows release bundle build script | Proven; installer/signing not implemented |
 
 ## Known gaps
@@ -93,14 +100,13 @@ Bundle появляется в `dist/endless-windows-x64`. Isar native library �
 
 1. Complete workspace rename/archive/delete lifecycle, multi-block editor и
    window-close flush.
-2. Search projection и rebuild.
-3. Managed attachments со staging journal и traversal/symlink corpus.
-4. Versioned import/export и backup/restore с clean-profile round trip.
-5. MCP adapter, scopes, approval и audit.
-6. Event subscription/reconnect и multi-client concurrency.
-7. Migration fixtures, disk-full/permission/fault-injection matrix.
-8. Benchmark dataset/report и long offline soak.
-9. Installer, signing policy, diagnostics, SBOM, license/notices и clean-machine
+2. Managed attachments со staging journal и traversal/symlink corpus.
+3. Versioned import/export и backup/restore с clean-profile round trip.
+4. MCP adapter, scopes, approval и audit.
+5. Event subscription/reconnect и multi-client concurrency.
+6. Migration fixtures, disk-full/permission/fault-injection matrix.
+7. Search 10k/100k benchmark, решение D6 и long offline soak.
+8. Installer, signing policy, diagnostics, SBOM, license/notices и clean-machine
    release matrix.
 
 Открытые product/architecture decisions в

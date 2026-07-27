@@ -57,5 +57,15 @@ abstract interface class EndlessLocalApi {
     int? expectedRevision,
   });
 
+  Future<List<JsonMap>> searchDocuments({
+    required String workspaceId,
+    required String query,
+    int limit = 50,
+  });
+
+  Future<JsonMap> getSearchStatus();
+
+  Future<JsonMap> rebuildSearchIndex({required String commandId});
+
   Future<void> close();
 }

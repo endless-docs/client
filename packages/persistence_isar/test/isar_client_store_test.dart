@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:client_application/client_application.dart';
+import 'package:client_domain/client_domain.dart';
 import 'package:persistence_isar/persistence_isar.dart';
 import 'package:test/test.dart';
 
@@ -38,6 +39,23 @@ void main() {
         name: 'Offline',
       );
       final String workspaceId = created.result['workspace_id']! as String;
+      final CommandReceipt document = await service.createDocument(
+        commandId: 'durable-document',
+        workspaceId: workspaceId,
+        title: 'Searchable note',
+      );
+      await service.saveDocument(
+        commandId: 'durable-save',
+        documentId: document.result['document_id']! as String,
+        title: 'Searchable note',
+        blocks: const <BlockDraft>[
+          BlockDraft(
+            type: BlockType.paragraph,
+            payload: <String, Object?>{'text': 'survives cold restart'},
+          ),
+        ],
+        expectedRevision: 1,
+      );
       await store.close();
 
       store = await IsarClientStore.open(
@@ -63,6 +81,13 @@ void main() {
       expect(replay.wasReplay, isTrue);
       expect(replay.result['workspace_id'], workspaceId);
       expect(await service.listWorkspaces(), hasLength(1));
+      final List<SearchHit> search = await service.searchDocuments(
+        workspaceId: workspaceId,
+        query: 'cold restart',
+      );
+      expect(search, hasLength(1));
+      expect(search.single.title, 'Searchable note');
+      expect((await service.getSearchStatus()).isCurrent, isTrue);
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );

@@ -3,3 +3,4 @@ library;
 
 export 'src/application_service.dart';
 export 'src/ports.dart';
+export 'src/search.dart';

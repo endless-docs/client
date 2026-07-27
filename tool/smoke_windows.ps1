@@ -97,6 +97,16 @@ try {
         'restore',
         $child.document_id
     )
+    $searchBefore = @(
+        Invoke-CliJson @(
+            'search',
+            $workspace.workspace_id,
+            'OfflineNote'
+        )
+    )
+    if ($searchBefore.Count -ne 1) {
+        throw 'Local search did not find the restored document.'
+    }
 
     $firstEndpoint = Get-Content -Raw $endpointPath | ConvertFrom-Json
     Stop-SmokeDaemon $firstEndpoint.process_id
@@ -110,6 +120,21 @@ try {
     if ($secondEndpoint.process_id -eq $firstEndpoint.process_id) {
         throw 'Daemon PID did not change after forced restart.'
     }
+    $searchAfter = @(
+        Invoke-CliJson @(
+            'search',
+            $workspace.workspace_id,
+            'OfflineNote'
+        )
+    )
+    if ($searchAfter.Count -ne 1) {
+        throw 'Local search projection did not survive cold restart.'
+    }
+    $searchStatus = Invoke-CliJson @('search-index', 'status')
+    $rebuilt = Invoke-CliJson @('search-index', 'rebuild')
+    if (-not $searchStatus.is_current -or -not $rebuilt.is_current) {
+        throw 'Local search index is not current.'
+    }
     Stop-SmokeDaemon $secondEndpoint.process_id
 
     [pscustomobject]@{
@@ -117,6 +142,8 @@ try {
         Workspace = $workspace.name
         Document = $restored.title
         TreeRecycle = $true
+        LocalSearch = $true
+        SearchRebuild = $true
         ColdRestart = $true
         ExternalProxyBlocked = $true
         Profile = $smokeRoot

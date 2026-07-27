@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:client_domain/client_domain.dart';
 
 import 'ports.dart';
+import 'search.dart';
 
 final class ApplicationException implements Exception {
   const ApplicationException(this.code, this.message);
@@ -90,6 +91,87 @@ final class ClientApplicationService {
       );
     }
     return document;
+  }
+
+  Future<List<SearchHit>> searchDocuments({
+    required String workspaceId,
+    required String query,
+    int limit = 50,
+  }) async {
+    await getWorkspace(workspaceId);
+    final String normalizedQuery = query.trim();
+    if (normalizedQuery.isEmpty || normalizedQuery.length > 500) {
+      throw const ApplicationException(
+        'InvalidArgument',
+        'Search query must contain between 1 and 500 characters.',
+      );
+    }
+    if (limit < 1 || limit > 100) {
+      throw const ApplicationException(
+        'InvalidArgument',
+        'Search limit must be between 1 and 100.',
+      );
+    }
+    return _store.read(
+      (ClientStoreReader reader) =>
+          reader.searchDocuments(workspaceId, normalizedQuery, limit: limit),
+    );
+  }
+
+  Future<SearchStatus> getSearchStatus() =>
+      _store.read((ClientStoreReader reader) => reader.getSearchStatus());
+
+  Future<SearchStatus> ensureSearchIndex() =>
+      _store.write((ClientStoreWriter writer) async {
+        final SearchStatus status = await writer.getSearchStatus();
+        return status.isCurrent ? status : _replaceSearchIndex(writer);
+      });
+
+  Future<CommandReceipt> rebuildSearchIndex({required String commandId}) {
+    const String method = 'RebuildSearchIndex';
+    const String fingerprint = '{}';
+    if (commandId.isEmpty || commandId.length > 200) {
+      throw const ApplicationException(
+        'InvalidArgument',
+        'A bounded command_id is required.',
+      );
+    }
+    return _store.write((ClientStoreWriter writer) async {
+      final CommandOutcome? existing = await writer.getCommandOutcome(
+        commandId,
+      );
+      if (existing != null) {
+        if (existing.method != method || existing.fingerprint != fingerprint) {
+          throw const ApplicationException(
+            'CommandIdReused',
+            'command_id was already used for another request.',
+          );
+        }
+        return CommandReceipt(
+          result: existing.result,
+          commitSequence: existing.commitSequence,
+          wasReplay: true,
+        );
+      }
+
+      final SearchStatus status = await _replaceSearchIndex(writer);
+      final int sequence = status.indexedSequence;
+      final Map<String, Object?> result = status.toJson();
+      await writer.putCommandOutcome(
+        CommandOutcome(
+          commandId: commandId,
+          method: method,
+          fingerprint: fingerprint,
+          result: result,
+          commitSequence: sequence,
+        ),
+      );
+      return CommandReceipt(
+        result: result,
+        commitSequence: sequence,
+        wasReplay: false,
+      );
+    });
   }
 
   Future<CommandReceipt> createWorkspace({
@@ -203,6 +285,7 @@ final class ClientApplicationService {
           updatedAt: now,
         );
         await writer.putDocument(document);
+        await writer.putSearchProjection(_searchProjection(document));
         return document.toJson();
       },
     );
@@ -269,6 +352,7 @@ final class ClientApplicationService {
           now: _clock.now(),
         );
         await writer.putDocument(updated);
+        await writer.putSearchProjection(_searchProjection(updated));
         return updated.toJson();
       },
     );
@@ -309,6 +393,7 @@ final class ClientApplicationService {
           now: _clock.now(),
         );
         await writer.putDocument(updated);
+        await writer.putSearchProjection(_searchProjection(updated));
         return updated.toJson();
       },
     );
@@ -372,6 +457,11 @@ final class ClientApplicationService {
       final DateTime now = _clock.now();
       final Document updated = document.markDeleted(deleted, now);
       await writer.putDocument(updated);
+      if (deleted) {
+        await writer.removeSearchProjection(updated.id);
+      } else {
+        await writer.putSearchProjection(_searchProjection(updated));
+      }
       final List<String> affectedIds = <String>[updated.id];
       if (deleted) {
         final List<Document> allDocuments = await writer.listDocuments(
@@ -389,6 +479,7 @@ final class ClientApplicationService {
               now,
             );
             await writer.putDocument(deletedDescendant);
+            await writer.removeSearchProjection(deletedDescendant.id);
             affectedIds.add(deletedDescendant.id);
           }
         }
@@ -440,6 +531,7 @@ final class ClientApplicationService {
           (result['workspace_id'] as String?) ?? workspaceId;
       final int resultRevision = (result['revision'] as int?) ?? baseRevision;
       final int sequence = await writer.nextEventSequence();
+      await writer.setSearchIndexedSequence(sequence);
       await writer.appendOperation(
         Operation(
           id: _ids.nextId(),
@@ -572,5 +664,49 @@ final class ClientApplicationService {
       }
     }
     return result;
+  }
+
+  static Future<SearchStatus> _replaceSearchIndex(
+    ClientStoreWriter writer,
+  ) async {
+    final List<SearchProjection> projections = <SearchProjection>[];
+    for (final Workspace workspace in await writer.listWorkspaces(
+      includeArchived: true,
+    )) {
+      for (final Document document in await writer.listDocuments(
+        workspace.id,
+      )) {
+        projections.add(_searchProjection(document));
+      }
+    }
+    await writer.replaceSearchProjections(projections);
+    final int sequence = await writer.currentEventSequence();
+    await writer.setSearchIndexedSequence(sequence);
+    return writer.getSearchStatus();
+  }
+
+  static SearchProjection _searchProjection(Document document) =>
+      SearchProjection(
+        documentId: document.id,
+        workspaceId: document.workspaceId,
+        title: document.title,
+        content: document.blocks
+            .expand((Block block) => _stringValues(block.payload))
+            .join('\n'),
+        revision: document.revision,
+      );
+
+  static Iterable<String> _stringValues(Object? value) sync* {
+    if (value is String) {
+      yield value;
+    } else if (value is Map<Object?, Object?>) {
+      for (final Object? nested in value.values) {
+        yield* _stringValues(nested);
+      }
+    } else if (value is Iterable<Object?>) {
+      for (final Object? nested in value) {
+        yield* _stringValues(nested);
+      }
+    }
   }
 }

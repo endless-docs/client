@@ -188,6 +188,92 @@ void main() {
       expect(await service.listDocuments(workspaceId), hasLength(2));
     },
   );
+
+  test(
+    'search projection follows update, delete, restore, and rebuild',
+    () async {
+      final CommandReceipt workspace = await service.createWorkspace(
+        commandId: 'workspace',
+        name: 'Personal',
+      );
+      final String workspaceId = workspace.result['workspace_id']! as String;
+      final CommandReceipt created = await service.createDocument(
+        commandId: 'document',
+        workspaceId: workspaceId,
+        title: 'Field notes',
+      );
+      final String documentId = created.result['document_id']! as String;
+
+      await service.saveDocument(
+        commandId: 'save',
+        documentId: documentId,
+        title: 'Field notes',
+        blocks: const <BlockDraft>[
+          BlockDraft(
+            type: BlockType.paragraph,
+            payload: <String, Object?>{'text': 'Offline search needle'},
+          ),
+        ],
+        expectedRevision: 1,
+      );
+      expect(
+        await service.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'needle',
+        ),
+        hasLength(1),
+      );
+
+      await service.deleteDocument(
+        commandId: 'delete',
+        documentId: documentId,
+        expectedRevision: 2,
+      );
+      expect(
+        await service.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'needle',
+        ),
+        isEmpty,
+      );
+      await service.restoreDocument(
+        commandId: 'restore',
+        documentId: documentId,
+        expectedRevision: 3,
+      );
+      expect(
+        await service.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'needle',
+        ),
+        hasLength(1),
+      );
+
+      store.searchProjections.clear();
+      final CommandReceipt rebuilt = await service.rebuildSearchIndex(
+        commandId: 'rebuild',
+      );
+      expect(rebuilt.result['is_current'], isTrue);
+      expect(rebuilt.result['document_count'], 1);
+      expect(
+        await service.searchDocuments(
+          workspaceId: workspaceId,
+          query: 'needle',
+        ),
+        hasLength(1),
+      );
+      expect(
+        (await service.rebuildSearchIndex(commandId: 'rebuild')).wasReplay,
+        isTrue,
+      );
+
+      store.searchProjections.clear();
+      store.searchIndexedSequence = 0;
+      final SearchStatus repaired = await service.ensureSearchIndex();
+      expect(repaired.isCurrent, isTrue);
+      expect(repaired.documentCount, 1);
+    },
+  );
 }
 
 final class _FixedClock implements Clock {
@@ -213,7 +299,10 @@ final class _MemoryStore implements ClientStore {
   Map<String, Document> documents = <String, Document>{};
   Map<String, CommandOutcome> outcomes = <String, CommandOutcome>{};
   List<Operation> operations = <Operation>[];
+  Map<String, SearchProjection> searchProjections =
+      <String, SearchProjection>{};
   int sequence = 0;
+  int searchIndexedSequence = 0;
 
   @override
   Future<T> read<T>(
@@ -232,7 +321,9 @@ final class _MemoryStore implements ClientStore {
       documents = snapshot.documents;
       outcomes = snapshot.outcomes;
       operations = snapshot.operations;
+      searchProjections = snapshot.searchProjections;
       sequence = snapshot.sequence;
+      searchIndexedSequence = snapshot.searchIndexedSequence;
       rethrow;
     }
   }
@@ -242,7 +333,9 @@ final class _MemoryStore implements ClientStore {
     ..documents = Map<String, Document>.of(documents)
     ..outcomes = Map<String, CommandOutcome>.of(outcomes)
     ..operations = List<Operation>.of(operations)
-    ..sequence = sequence;
+    ..searchProjections = Map<String, SearchProjection>.of(searchProjections)
+    ..sequence = sequence
+    ..searchIndexedSequence = searchIndexedSequence;
 }
 
 final class _MemoryTransaction implements ClientStoreWriter {
@@ -258,6 +351,9 @@ final class _MemoryTransaction implements ClientStoreWriter {
   @override
   Future<CommandOutcome?> getCommandOutcome(String commandId) async =>
       store.outcomes[commandId];
+
+  @override
+  Future<int> currentEventSequence() async => store.sequence;
 
   @override
   Future<Document?> getDocument(String documentId) async =>
@@ -292,6 +388,13 @@ final class _MemoryTransaction implements ClientStoreWriter {
       .toList();
 
   @override
+  Future<SearchStatus> getSearchStatus() async => SearchStatus(
+    eventSequence: store.sequence,
+    indexedSequence: store.searchIndexedSequence,
+    documentCount: store.searchProjections.length,
+  );
+
+  @override
   Future<int> nextEventSequence() async => ++store.sequence;
 
   @override
@@ -305,7 +408,62 @@ final class _MemoryTransaction implements ClientStoreWriter {
   }
 
   @override
+  Future<void> putSearchProjection(SearchProjection projection) async {
+    store.searchProjections[projection.documentId] = projection;
+  }
+
+  @override
   Future<void> putWorkspace(Workspace workspace) async {
     store.workspaces[workspace.id] = workspace;
+  }
+
+  @override
+  Future<void> removeSearchProjection(String documentId) async {
+    store.searchProjections.remove(documentId);
+  }
+
+  @override
+  Future<void> replaceSearchProjections(
+    List<SearchProjection> projections,
+  ) async {
+    store.searchProjections = <String, SearchProjection>{
+      for (final SearchProjection projection in projections)
+        projection.documentId: projection,
+    };
+  }
+
+  @override
+  Future<List<SearchHit>> searchDocuments(
+    String workspaceId,
+    String query, {
+    required int limit,
+  }) async {
+    final String term = query.toLowerCase();
+    return store.searchProjections.values
+        .where(
+          (SearchProjection projection) =>
+              projection.workspaceId == workspaceId &&
+              '${projection.title}\n${projection.content}'
+                  .toLowerCase()
+                  .contains(term),
+        )
+        .take(limit)
+        .map(
+          (SearchProjection projection) => SearchHit(
+            documentId: projection.documentId,
+            workspaceId: projection.workspaceId,
+            title: projection.title,
+            snippet: projection.content,
+            score: 1,
+            observedRevision: projection.revision,
+            indexedSequence: store.searchIndexedSequence,
+          ),
+        )
+        .toList();
+  }
+
+  @override
+  Future<void> setSearchIndexedSequence(int sequence) async {
+    store.searchIndexedSequence = sequence;
   }
 }

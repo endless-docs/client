@@ -50,10 +50,17 @@ final class AppController extends ChangeNotifier {
   String? errorMessage;
   bool reconnecting = false;
   bool showRecycleBin = false;
+  bool searching = false;
+  String searchQuery = '';
+  String? searchError;
+  List<JsonMap> searchResults = <JsonMap>[];
   List<JsonMap> workspaces = <JsonMap>[];
   List<JsonMap> documents = <JsonMap>[];
   String? selectedWorkspaceId;
   String? selectedDocumentId;
+  int _searchRequest = 0;
+
+  bool get hasSearch => searchQuery.isNotEmpty;
 
   JsonMap? get selectedDocument {
     final String? id = selectedDocumentId;
@@ -200,6 +207,7 @@ final class AppController extends ChangeNotifier {
       selectedWorkspaceId = null;
       selectedDocumentId = null;
       documents = <JsonMap>[];
+      _clearSearchState();
       return;
     }
     final bool selectedStillExists = workspaces.any(
@@ -216,6 +224,7 @@ final class AppController extends ChangeNotifier {
     if (workspaceId == null) {
       documents = <JsonMap>[];
       selectedDocumentId = null;
+      _clearSearchState();
       return;
     }
     documents = await _withReconnect(
@@ -240,6 +249,7 @@ final class AppController extends ChangeNotifier {
     selectedWorkspaceId = workspaceId;
     selectedDocumentId = null;
     showRecycleBin = false;
+    _clearSearchState();
     await _loadDocuments();
     notifyListeners();
   }
@@ -260,6 +270,7 @@ final class AppController extends ChangeNotifier {
     }
     await flushPendingChanges();
     showRecycleBin = value;
+    _clearSearchState();
     selectedDocumentId = null;
     if (!value && activeDocuments.isNotEmpty) {
       selectedDocumentId = requireString(activeDocuments.first, 'document_id');
@@ -278,6 +289,7 @@ final class AppController extends ChangeNotifier {
     selectedWorkspaceId = requireString(created, 'workspace_id');
     selectedDocumentId = null;
     showRecycleBin = false;
+    _clearSearchState();
     await _loadDocuments();
     notifyListeners();
   }
@@ -298,6 +310,7 @@ final class AppController extends ChangeNotifier {
       ),
     );
     showRecycleBin = false;
+    _clearSearchState();
     await _loadDocuments();
     selectedDocumentId = requireString(created, 'document_id');
     notifyListeners();
@@ -357,6 +370,7 @@ final class AppController extends ChangeNotifier {
       ),
     );
     await _loadDocuments();
+    await _refreshSearch();
     selectedDocumentId = documentId;
     notifyListeners();
   }
@@ -387,6 +401,7 @@ final class AppController extends ChangeNotifier {
       selectedDocumentId = null;
     }
     await _loadDocuments();
+    await _refreshSearch();
     notifyListeners();
   }
 
@@ -401,7 +416,53 @@ final class AppController extends ChangeNotifier {
       ),
     );
     await _loadDocuments();
+    await _refreshSearch();
     notifyListeners();
+  }
+
+  Future<void> search(String query) async {
+    final int request = ++_searchRequest;
+    final String normalized = query.trim();
+    searchQuery = normalized;
+    searchError = null;
+    if (normalized.isEmpty || selectedWorkspaceId == null) {
+      searchResults = <JsonMap>[];
+      searching = false;
+      notifyListeners();
+      return;
+    }
+    searching = true;
+    notifyListeners();
+    try {
+      await flushPendingChanges();
+      final List<JsonMap> results = await _withReconnect(
+        (EndlessLocalApi client) => client.searchDocuments(
+          workspaceId: selectedWorkspaceId!,
+          query: normalized,
+        ),
+      );
+      if (request != _searchRequest) {
+        return;
+      }
+      searchResults = results;
+    } on LocalApiException catch (error) {
+      if (request != _searchRequest) {
+        return;
+      }
+      searchResults = <JsonMap>[];
+      searchError = error.message;
+    } on Object {
+      if (request != _searchRequest) {
+        return;
+      }
+      searchResults = <JsonMap>[];
+      searchError = 'Не удалось выполнить локальный поиск.';
+    } finally {
+      if (request == _searchRequest) {
+        searching = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<void> reloadSelectedDocument() async {
@@ -433,6 +494,20 @@ final class AppController extends ChangeNotifier {
     if (index >= 0) {
       documents[index] = document;
     }
+  }
+
+  Future<void> _refreshSearch() async {
+    if (searchQuery.isNotEmpty) {
+      await search(searchQuery);
+    }
+  }
+
+  void _clearSearchState() {
+    _searchRequest += 1;
+    searchQuery = '';
+    searchResults = <JsonMap>[];
+    searchError = null;
+    searching = false;
   }
 
   Future<T> _withReconnect<T>(

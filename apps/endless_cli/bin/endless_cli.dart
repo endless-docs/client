@@ -117,6 +117,22 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
       expectedRevision: requireInt(document, 'revision'),
     );
   }
+  if (command.length >= 3 && command[0] == 'search') {
+    return client.searchDocuments(
+      workspaceId: command[1],
+      query: command.sublist(2).join(' '),
+    );
+  }
+  if (command.length == 2 &&
+      command[0] == 'search-index' &&
+      command[1] == 'status') {
+    return client.getSearchStatus();
+  }
+  if (command.length == 2 &&
+      command[0] == 'search-index' &&
+      command[1] == 'rebuild') {
+    return client.rebuildSearchIndex(commandId: _commandId());
+  }
   throw const FormatException('Unknown command.');
 }
 
@@ -218,4 +234,7 @@ Usage:
   endless [options] document move DOCUMENT_ID PARENT_ID|root
   endless [options] document delete DOCUMENT_ID
   endless [options] document restore DOCUMENT_ID
+  endless [options] search WORKSPACE_ID QUERY
+  endless [options] search-index status
+  endless [options] search-index rebuild
 ''';

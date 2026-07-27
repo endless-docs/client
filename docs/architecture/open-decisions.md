@@ -153,6 +153,12 @@ Evidence:
 - index rebuild behavior;
 - package/platform support.
 
+Current baseline: application-owned search ports are implemented with an Isar
+projection updated in the authoritative transaction. Rebuild and cold-restart
+correctness are verified, but the adapter currently performs normalized
+substring matching. This does not select option 1 until the required dataset,
+tokenization and latency evidence exists.
+
 ## D7 — Attachment persistence
 
 Status: open

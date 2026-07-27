@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:local_api/local_api.dart';
 import 'package:local_api_client/local_api_client.dart';
 import 'package:locald/locald.dart';
+import 'package:persistence_isar/persistence_isar.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -70,6 +71,13 @@ void main() {
         title: 'Nested note',
         parentId: requireString(saved, 'document_id'),
       );
+      expect(
+        await client.searchDocuments(
+          workspaceId: requireString(workspace, 'workspace_id'),
+          query: 'cloud',
+        ),
+        hasLength(1),
+      );
       final JsonMap deletedParent = await client.deleteDocument(
         commandId: 'delete-tree-command',
         documentId: requireString(saved, 'document_id'),
@@ -89,6 +97,13 @@ void main() {
             isTrue,
           ),
         ),
+      );
+      expect(
+        await client.searchDocuments(
+          workspaceId: requireString(workspace, 'workspace_id'),
+          query: 'cloud',
+        ),
+        isEmpty,
       );
       await expectLater(
         client.restoreDocument(
@@ -116,10 +131,31 @@ void main() {
         documentId: requireString(child, 'document_id'),
         expectedRevision: requireInt(deletedChild, 'revision'),
       );
+      final JsonMap rebuilt = await client.rebuildSearchIndex(
+        commandId: 'rebuild-search-command',
+      );
+      expect(rebuilt['is_current'], isTrue);
+      expect(rebuilt['document_count'], 2);
 
       expect(await _unauthenticatedStatus(endpoint), HttpStatus.unauthorized);
+      final String databasePath = server.paths.database.path;
       await client.close();
       await server.close();
+
+      final IsarClientStore postUpgradeStore = await IsarClientStore.open(
+        directory: databasePath,
+        nativeLibraryPath:
+            '${Directory.current.path}${Platform.pathSeparator}.dart_tool'
+            '${Platform.pathSeparator}isar${Platform.pathSeparator}isar.dll',
+        allowDevelopmentDownload: true,
+      );
+      await postUpgradeStore.write((writer) async {
+        await writer.removeSearchProjection(
+          requireString(saved, 'document_id'),
+        );
+        await writer.setSearchIndexedSequence(0);
+      });
+      await postUpgradeStore.close();
 
       server = await LocaldServer.start(
         profileRoot: temporary.path,
@@ -151,6 +187,16 @@ void main() {
         ),
         hasLength(2),
       );
+      final List<JsonMap> search = await client.searchDocuments(
+        workspaceId: requireString(workspace, 'workspace_id'),
+        query: 'cloud',
+      );
+      expect(search, hasLength(1));
+      expect(search.single['document_id'], saved['document_id']);
+      expect(search.single['indexed_sequence'], isA<int>());
+      final JsonMap repairedStatus = await client.getSearchStatus();
+      expect(repairedStatus['is_current'], isTrue);
+      expect(repairedStatus['document_count'], 2);
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );

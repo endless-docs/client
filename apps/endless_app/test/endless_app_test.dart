@@ -22,14 +22,14 @@ void main() {
 
     await tester.tap(find.text('Создать пространство'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Личное');
+    await tester.enterText(find.byType(TextField).last, 'Личное');
     await tester.tap(find.text('Создать'));
     await tester.pumpAndSettle();
     expect(find.text('Личное'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Новый документ'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Заметка');
+    await tester.enterText(find.byType(TextField).last, 'Заметка');
     await tester.tap(find.text('Создать'));
     await tester.pumpAndSettle();
 
@@ -134,6 +134,33 @@ void main() {
     expect(api.saveCommandIds, hasLength(2));
     expect(api.saveCommandIds.toSet(), hasLength(1));
     expect(bootstrapCalls, 2);
+  });
+
+  testWidgets('finds an offline document and opens the result', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Полевые заметки');
+    final JsonMap document = controller.selectedDocument!;
+    await controller.saveDocument(
+      documentId: requireString(document, 'document_id'),
+      title: 'Полевые заметки',
+      text: 'Автономная поисковая иголка',
+      expectedRevision: requireInt(document, 'revision'),
+    );
+
+    await controller.search('иголка');
+    await tester.pumpAndSettle();
+
+    expect(controller.searchResults, hasLength(1));
+    expect(find.text('Полевые заметки'), findsWidgets);
+    expect(find.text('Автономная поисковая иголка'), findsWidgets);
+    expect(find.byTooltip('Очистить поиск'), findsOneWidget);
   });
 
   testWidgets('shows a recoverable startup error', (WidgetTester tester) async {
@@ -360,6 +387,49 @@ final class _FakeLocalApi implements EndlessLocalApi {
     _documents[index] = restored;
     return restored;
   }
+
+  @override
+  Future<List<JsonMap>> searchDocuments({
+    required String workspaceId,
+    required String query,
+    int limit = 50,
+  }) async {
+    final String normalized = query.toLowerCase();
+    return _documents
+        .where(
+          (JsonMap document) =>
+              document['workspace_id'] == workspaceId &&
+              document['is_deleted'] != true &&
+              '${document['title']} ${savedTextByDocument[document['document_id']] ?? ''}'
+                  .toLowerCase()
+                  .contains(normalized),
+        )
+        .take(limit)
+        .map(
+          (JsonMap document) => <String, Object?>{
+            'document_id': document['document_id'],
+            'workspace_id': workspaceId,
+            'title': document['title'],
+            'snippet': savedTextByDocument[document['document_id']] ?? '',
+            'score': 1,
+            'observed_revision': document['revision'],
+            'indexed_sequence': 1,
+          },
+        )
+        .toList();
+  }
+
+  @override
+  Future<JsonMap> getSearchStatus() async => <String, Object?>{
+    'event_sequence': 1,
+    'indexed_sequence': 1,
+    'document_count': _documents.length,
+    'is_current': true,
+  };
+
+  @override
+  Future<JsonMap> rebuildSearchIndex({required String commandId}) =>
+      getSearchStatus();
 
   int _indexOf(String documentId) {
     final int index = _documents.indexWhere(

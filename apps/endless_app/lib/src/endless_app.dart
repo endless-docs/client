@@ -218,6 +218,15 @@ final class _NavigationPane extends StatelessWidget {
         ),
         const Divider(height: 1),
         Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: _SearchBox(
+            controller: controller,
+            enabled:
+                controller.selectedWorkspaceId != null &&
+                !controller.showRecycleBin,
+          ),
+        ),
+        Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
           child: Row(
             children: <Widget>[
@@ -259,6 +268,8 @@ final class _NavigationPane extends StatelessWidget {
         Expanded(
           child: controller.showRecycleBin
               ? _RecycleList(controller: controller)
+              : controller.hasSearch
+              ? _SearchResults(controller: controller)
               : controller.activeDocuments.isEmpty
               ? const Center(
                   child: Padding(
@@ -342,6 +353,139 @@ final class _NavigationPane extends StatelessWidget {
       ],
     ),
   );
+}
+
+final class _SearchBox extends StatefulWidget {
+  const _SearchBox({required this.controller, required this.enabled});
+
+  final AppController controller;
+  final bool enabled;
+
+  @override
+  State<_SearchBox> createState() => _SearchBoxState();
+}
+
+final class _SearchBoxState extends State<_SearchBox> {
+  late final TextEditingController _text;
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _text = TextEditingController(text: widget.controller.searchQuery);
+  }
+
+  @override
+  void didUpdateWidget(_SearchBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_text.text != widget.controller.searchQuery) {
+      _text.value = TextEditingValue(
+        text: widget.controller.searchQuery,
+        selection: TextSelection.collapsed(
+          offset: widget.controller.searchQuery.length,
+        ),
+      );
+    }
+  }
+
+  void _changed(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(
+      const Duration(milliseconds: 300),
+      () => unawaited(widget.controller.search(value)),
+    );
+  }
+
+  void _submit(String value) {
+    _debounce?.cancel();
+    unawaited(widget.controller.search(value));
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    controller: _text,
+    enabled: widget.enabled,
+    onChanged: _changed,
+    onSubmitted: _submit,
+    textInputAction: TextInputAction.search,
+    decoration: InputDecoration(
+      hintText: 'Поиск без интернета',
+      prefixIcon: const Icon(Icons.search),
+      suffixIcon: widget.controller.searching
+          ? const Padding(
+              padding: EdgeInsets.all(13),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : widget.controller.hasSearch
+          ? IconButton(
+              tooltip: 'Очистить поиск',
+              onPressed: () {
+                _text.clear();
+                _submit('');
+              },
+              icon: const Icon(Icons.close),
+            )
+          : null,
+      border: const OutlineInputBorder(),
+      isDense: true,
+    ),
+  );
+}
+
+final class _SearchResults extends StatelessWidget {
+  const _SearchResults({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? error = controller.searchError;
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(error, textAlign: TextAlign.center),
+        ),
+      );
+    }
+    if (controller.searchResults.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('Ничего не найдено локально.'),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: controller.searchResults.length,
+      itemBuilder: (BuildContext context, int index) {
+        final JsonMap hit = controller.searchResults[index];
+        final String id = requireString(hit, 'document_id');
+        final String snippet = requireString(hit, 'snippet');
+        return ListTile(
+          selected: id == controller.selectedDocumentId,
+          leading: const Icon(Icons.manage_search),
+          title: Text(
+            requireString(hit, 'title'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: snippet.isEmpty
+              ? null
+              : Text(snippet, maxLines: 2, overflow: TextOverflow.ellipsis),
+          onTap: () =>
+              _runUiAction(context, () => controller.selectDocument(id)),
+        );
+      },
+    );
+  }
 }
 
 final class _RecycleList extends StatelessWidget {

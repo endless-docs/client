@@ -42,6 +42,7 @@ final class IsarClientStore implements ClientStore {
         BlockRecordSchema,
         CommandOutcomeRecordSchema,
         OperationRecordSchema,
+        SearchProjectionRecordSchema,
         RuntimeStateRecordSchema,
       ],
       directory: directory,
@@ -175,6 +176,73 @@ class _IsarReader implements ClientStoreReader {
     );
   }
 
+  @override
+  Future<List<SearchHit>> searchDocuments(
+    String workspaceId,
+    String query, {
+    required int limit,
+  }) async {
+    final RuntimeStateRecord? state = await isar.runtimeStateRecords.get(1);
+    final int indexedSequence = state?.searchIndexedSequence ?? 0;
+    final List<String> terms = _normalizeSearchText(
+      query,
+    ).split(' ').where((String term) => term.isNotEmpty).toList();
+    final List<_RankedProjection> ranked = <_RankedProjection>[];
+    for (final SearchProjectionRecord projection
+        in await isar.searchProjectionRecords.where().findAll()) {
+      if (projection.workspaceId != workspaceId ||
+          !terms.every(projection.normalizedText.contains)) {
+        continue;
+      }
+      final String normalizedTitle = _normalizeSearchText(projection.title);
+      int score = 10;
+      for (final String term in terms) {
+        if (normalizedTitle == term) {
+          score += 100;
+        } else if (normalizedTitle.startsWith(term)) {
+          score += 50;
+        } else if (normalizedTitle.contains(term)) {
+          score += 25;
+        }
+      }
+      ranked.add(_RankedProjection(projection, score));
+    }
+    ranked.sort((_RankedProjection left, _RankedProjection right) {
+      final int score = right.score.compareTo(left.score);
+      return score != 0
+          ? score
+          : left.projection.title.compareTo(right.projection.title);
+    });
+    return ranked
+        .take(limit)
+        .map(
+          (_RankedProjection ranked) => SearchHit(
+            documentId: ranked.projection.documentId,
+            workspaceId: ranked.projection.workspaceId,
+            title: ranked.projection.title,
+            snippet: _searchSnippet(ranked.projection.content, terms),
+            score: ranked.score,
+            observedRevision: ranked.projection.revision,
+            indexedSequence: indexedSequence,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<SearchStatus> getSearchStatus() async {
+    final RuntimeStateRecord? state = await isar.runtimeStateRecords.get(1);
+    return SearchStatus(
+      eventSequence: state?.eventSequence ?? 0,
+      indexedSequence: state?.searchIndexedSequence ?? 0,
+      documentCount: await isar.searchProjectionRecords.count(),
+    );
+  }
+
+  @override
+  Future<int> currentEventSequence() async =>
+      (await isar.runtimeStateRecords.get(1))?.eventSequence ?? 0;
+
   Future<Document> _documentFromRecord(DocumentRecord record) async {
     final List<BlockRecord> allBlocks = await isar.blockRecords
         .where()
@@ -292,10 +360,64 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
   }
 
   @override
+  Future<void> putSearchProjection(SearchProjection projection) async {
+    final SearchProjectionRecord record =
+        await isar.searchProjectionRecords
+            .filter()
+            .documentIdEqualTo(projection.documentId)
+            .findFirst() ??
+        SearchProjectionRecord();
+    _writeSearchProjection(record, projection);
+    await isar.searchProjectionRecords.put(record);
+  }
+
+  @override
+  Future<void> removeSearchProjection(String documentId) async {
+    final SearchProjectionRecord? record = await isar.searchProjectionRecords
+        .filter()
+        .documentIdEqualTo(documentId)
+        .findFirst();
+    if (record != null) {
+      await isar.searchProjectionRecords.delete(record.id);
+    }
+  }
+
+  @override
+  Future<void> replaceSearchProjections(
+    List<SearchProjection> projections,
+  ) async {
+    final List<int> ids = (await isar.searchProjectionRecords.where().findAll())
+        .map((SearchProjectionRecord record) => record.id)
+        .toList();
+    await isar.searchProjectionRecords.deleteAll(ids);
+    await isar.searchProjectionRecords.putAll(
+      projections
+          .map(
+            (SearchProjection projection) =>
+                _writeSearchProjection(SearchProjectionRecord(), projection),
+          )
+          .toList(),
+    );
+  }
+
+  @override
+  Future<void> setSearchIndexedSequence(int sequence) async {
+    final RuntimeStateRecord state =
+        await isar.runtimeStateRecords.get(1) ??
+        (RuntimeStateRecord()
+          ..eventSequence = 0
+          ..searchIndexedSequence = 0);
+    state.searchIndexedSequence = sequence;
+    await isar.runtimeStateRecords.put(state);
+  }
+
+  @override
   Future<int> nextEventSequence() async {
     final RuntimeStateRecord state =
         await isar.runtimeStateRecords.get(1) ??
-        (RuntimeStateRecord()..eventSequence = 0);
+        (RuntimeStateRecord()
+          ..eventSequence = 0
+          ..searchIndexedSequence = 0);
     state.eventSequence += 1;
     await isar.runtimeStateRecords.put(state);
     return state.eventSequence;
@@ -352,4 +474,47 @@ BlockType _blockType(String value) {
     }
   }
   return BlockType.unsupported;
+}
+
+String _normalizeSearchText(String value) =>
+    value.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+
+String _searchSnippet(String content, List<String> terms) {
+  if (content.isEmpty) {
+    return '';
+  }
+  final String normalizedContent = content.toLowerCase();
+  int match = content.length;
+  for (final String term in terms) {
+    final int index = normalizedContent.indexOf(term);
+    if (index >= 0 && index < match) {
+      match = index;
+    }
+  }
+  final int start = match == content.length
+      ? 0
+      : (match - 40).clamp(0, content.length);
+  final int end = (start + 140).clamp(0, content.length);
+  return '${start > 0 ? '…' : ''}${content.substring(start, end).trim()}'
+      '${end < content.length ? '…' : ''}';
+}
+
+SearchProjectionRecord _writeSearchProjection(
+  SearchProjectionRecord record,
+  SearchProjection projection,
+) => record
+  ..documentId = projection.documentId
+  ..workspaceId = projection.workspaceId
+  ..title = projection.title
+  ..content = projection.content
+  ..normalizedText = _normalizeSearchText(
+    '${projection.title}\n${projection.content}',
+  )
+  ..revision = projection.revision;
+
+final class _RankedProjection {
+  const _RankedProjection(this.projection, this.score);
+
+  final SearchProjectionRecord projection;
+  final int score;
 }

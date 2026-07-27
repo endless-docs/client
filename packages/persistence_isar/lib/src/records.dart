@@ -87,8 +87,25 @@ class OperationRecord {
 }
 
 @collection
+class SearchProjectionRecord {
+  Id id = Isar.autoIncrement;
+
+  @Index(unique: true)
+  late String documentId;
+
+  @Index()
+  late String workspaceId;
+
+  late String title;
+  late String content;
+  late String normalizedText;
+  late int revision;
+}
+
+@collection
 class RuntimeStateRecord {
   Id id = 1;
 
   late int eventSequence;
+  late int searchIndexedSequence;
 }

@@ -154,6 +154,33 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     },
   );
 
+  @override
+  Future<List<JsonMap>> searchDocuments({
+    required String workspaceId,
+    required String query,
+    int limit = 50,
+  }) async {
+    final JsonMap data = await _query(
+      'SearchDocuments',
+      payload: <String, Object?>{
+        'workspace_id': workspaceId,
+        'query': query,
+        'limit': limit,
+      },
+    );
+    return requireMapList(data, 'results');
+  }
+
+  @override
+  Future<JsonMap> getSearchStatus() => _query('GetSearchStatus');
+
+  @override
+  Future<JsonMap> rebuildSearchIndex({required String commandId}) => _command(
+    commandId: commandId,
+    method: 'RebuildSearchIndex',
+    payload: const <String, Object?>{},
+  );
+
   Future<JsonMap> _query(String method, {JsonMap? payload}) =>
       _post('/v1/query', <String, Object?>{
         'request_id': _nextRequestId(),
