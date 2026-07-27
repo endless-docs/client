@@ -37,6 +37,14 @@ abstract interface class EndlessLocalApi {
     int? expectedRevision,
   });
 
+  Future<JsonMap> moveDocument({
+    required String commandId,
+    required String documentId,
+    required String? parentId,
+    required int position,
+    int? expectedRevision,
+  });
+
   Future<JsonMap> deleteDocument({
     required String commandId,
     required String documentId,

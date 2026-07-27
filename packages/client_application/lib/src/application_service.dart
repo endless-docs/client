@@ -369,9 +369,34 @@ final class ClientApplicationService {
           );
         }
       }
-      final Document updated = document.markDeleted(deleted, _clock.now());
+      final DateTime now = _clock.now();
+      final Document updated = document.markDeleted(deleted, now);
       await writer.putDocument(updated);
-      return updated.toJson();
+      final List<String> affectedIds = <String>[updated.id];
+      if (deleted) {
+        final List<Document> allDocuments = await writer.listDocuments(
+          document.workspaceId,
+          includeDeleted: true,
+        );
+        final List<Document> descendants = _descendantsOf(
+          document.id,
+          allDocuments,
+        );
+        for (final Document descendant in descendants) {
+          if (!descendant.isDeleted) {
+            final Document deletedDescendant = descendant.markDeleted(
+              true,
+              now,
+            );
+            await writer.putDocument(deletedDescendant);
+            affectedIds.add(deletedDescendant.id);
+          }
+        }
+      }
+      return <String, Object?>{
+        ...updated.toJson(),
+        'affected_document_ids': affectedIds,
+      };
     },
   );
 
@@ -528,5 +553,24 @@ final class ClientApplicationService {
         'Document changed since it was loaded.',
       );
     }
+  }
+
+  static List<Document> _descendantsOf(
+    String documentId,
+    List<Document> documents,
+  ) {
+    final List<Document> result = <Document>[];
+    final List<String> pending = <String>[documentId];
+    final Set<String> visited = <String>{documentId};
+    while (pending.isNotEmpty) {
+      final String parentId = pending.removeLast();
+      for (final Document candidate in documents) {
+        if (candidate.parentId == parentId && visited.add(candidate.id)) {
+          result.add(candidate);
+          pending.add(candidate.id);
+        }
+      }
+    }
+    return result;
   }
 }

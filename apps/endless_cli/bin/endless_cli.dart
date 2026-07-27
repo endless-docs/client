@@ -87,6 +87,36 @@ Future<Object> _execute(EndlessLocalApi client, List<String> command) async {
       title: command.sublist(3).join(' '),
     );
   }
+  if (command.length == 3 &&
+      command[0] == 'document' &&
+      command[1] == 'delete') {
+    final JsonMap document = await client.getDocument(command[2]);
+    return client.deleteDocument(
+      commandId: _commandId(),
+      documentId: command[2],
+      expectedRevision: requireInt(document, 'revision'),
+    );
+  }
+  if (command.length == 3 &&
+      command[0] == 'document' &&
+      command[1] == 'restore') {
+    final JsonMap document = await client.getDocument(command[2]);
+    return client.restoreDocument(
+      commandId: _commandId(),
+      documentId: command[2],
+      expectedRevision: requireInt(document, 'revision'),
+    );
+  }
+  if (command.length == 4 && command[0] == 'document' && command[1] == 'move') {
+    final JsonMap document = await client.getDocument(command[2]);
+    return client.moveDocument(
+      commandId: _commandId(),
+      documentId: command[2],
+      parentId: command[3] == 'root' ? null : command[3],
+      position: 0,
+      expectedRevision: requireInt(document, 'revision'),
+    );
+  }
   throw const FormatException('Unknown command.');
 }
 
@@ -185,4 +215,7 @@ Usage:
   endless [options] document list WORKSPACE_ID
   endless [options] document get DOCUMENT_ID
   endless [options] document create WORKSPACE_ID TITLE
+  endless [options] document move DOCUMENT_ID PARENT_ID|root
+  endless [options] document delete DOCUMENT_ID
+  endless [options] document restore DOCUMENT_ID
 ''';

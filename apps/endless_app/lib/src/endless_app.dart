@@ -122,12 +122,21 @@ final class _ReadyView extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('Endless Docs'),
-      actions: const <Widget>[
+      actions: <Widget>[
         Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Chip(
-            avatar: Icon(Icons.cloud_off_rounded, size: 18),
-            label: Text('Локально'),
+            avatar: controller.reconnecting
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cloud_off_rounded, size: 18),
+            label: Text(
+              controller.reconnecting
+                  ? 'Переподключение…'
+                  : 'Сохранение локально',
+            ),
           ),
         ),
       ],
@@ -137,7 +146,9 @@ final class _ReadyView extends StatelessWidget {
         SizedBox(width: 300, child: _NavigationPane(controller: controller)),
         const VerticalDivider(width: 1),
         Expanded(
-          child: controller.selectedDocument == null
+          child: controller.showRecycleBin
+              ? _RecycleBinView(controller: controller)
+              : controller.selectedDocument == null
               ? _EmptyDocumentView(controller: controller)
               : DocumentEditor(
                   key: ValueKey<String>(controller.selectedDocumentId!),
@@ -188,7 +199,10 @@ final class _NavigationPane extends StatelessWidget {
                               .toList(),
                           onChanged: (String? value) {
                             if (value != null) {
-                              controller.selectWorkspace(value);
+                              _runUiAction(
+                                context,
+                                () => controller.selectWorkspace(value),
+                              );
                             }
                           },
                         ),
@@ -207,10 +221,34 @@ final class _NavigationPane extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
           child: Row(
             children: <Widget>[
-              const Expanded(child: Text('Документы')),
+              Expanded(
+                child: Text(
+                  controller.showRecycleBin ? 'Корзина' : 'Документы',
+                ),
+              ),
+              IconButton(
+                tooltip: controller.showRecycleBin
+                    ? 'Вернуться к документам'
+                    : 'Открыть корзину',
+                onPressed: controller.selectedWorkspaceId == null
+                    ? null
+                    : () => _runUiAction(
+                        context,
+                        () => controller.setRecycleBin(
+                          !controller.showRecycleBin,
+                        ),
+                      ),
+                icon: Icon(
+                  controller.showRecycleBin
+                      ? Icons.arrow_back
+                      : Icons.delete_outline,
+                ),
+              ),
               IconButton(
                 tooltip: 'Новый документ',
-                onPressed: controller.selectedWorkspaceId == null
+                onPressed:
+                    controller.selectedWorkspaceId == null ||
+                        controller.showRecycleBin
                     ? null
                     : () => _createDocument(context, controller),
                 icon: const Icon(Icons.note_add_outlined),
@@ -219,7 +257,9 @@ final class _NavigationPane extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: controller.documents.isEmpty
+          child: controller.showRecycleBin
+              ? _RecycleList(controller: controller)
+              : controller.activeDocuments.isEmpty
               ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
@@ -230,22 +270,147 @@ final class _NavigationPane extends StatelessWidget {
                   ),
                 )
               : ListView.builder(
-                  itemCount: controller.documents.length,
+                  itemCount: controller.documentTree.length,
                   itemBuilder: (BuildContext context, int index) {
-                    final JsonMap document = controller.documents[index];
+                    final DocumentTreeEntry entry =
+                        controller.documentTree[index];
+                    final JsonMap document = entry.document;
                     final String id = requireString(document, 'document_id');
                     return ListTile(
+                      contentPadding: EdgeInsets.only(
+                        left: 12 + entry.depth * 20,
+                        right: 4,
+                      ),
                       selected: id == controller.selectedDocumentId,
-                      leading: const Icon(Icons.description_outlined),
+                      leading: Icon(
+                        controller.activeDocuments.any(
+                              (JsonMap candidate) =>
+                                  candidate['parent_id'] == id,
+                            )
+                            ? Icons.folder_outlined
+                            : Icons.description_outlined,
+                      ),
                       title: Text(
                         requireString(document, 'title'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      onTap: () => controller.selectDocument(id),
+                      trailing: PopupMenuButton<String>(
+                        tooltip: 'Действия с документом',
+                        onSelected: (String action) {
+                          if (action == 'child') {
+                            unawaited(
+                              _createDocument(
+                                context,
+                                controller,
+                                parentId: id,
+                              ),
+                            );
+                          } else if (action == 'move') {
+                            unawaited(
+                              _moveDocument(context, controller, document),
+                            );
+                          } else if (action == 'delete') {
+                            unawaited(_deleteDocument(context, controller, id));
+                          }
+                        },
+                        itemBuilder: (BuildContext context) =>
+                            const <PopupMenuEntry<String>>[
+                              PopupMenuItem<String>(
+                                value: 'child',
+                                child: Text('Создать вложенный'),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'move',
+                                child: Text('Переместить'),
+                              ),
+                              PopupMenuDivider(),
+                              PopupMenuItem<String>(
+                                value: 'delete',
+                                child: Text('Удалить'),
+                              ),
+                            ],
+                      ),
+                      onTap: () => _runUiAction(
+                        context,
+                        () => controller.selectDocument(id),
+                      ),
                     );
                   },
                 ),
+        ),
+      ],
+    ),
+  );
+}
+
+final class _RecycleList extends StatelessWidget {
+  const _RecycleList({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (controller.deletedDocuments.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('Корзина пуста.', textAlign: TextAlign.center),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: controller.deletedDocuments.length,
+      itemBuilder: (BuildContext context, int index) {
+        final JsonMap document = controller.deletedDocuments[index];
+        final String id = requireString(document, 'document_id');
+        return ListTile(
+          leading: const Icon(Icons.delete_outline),
+          title: Text(
+            requireString(document, 'title'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: IconButton(
+            tooltip: 'Восстановить документ',
+            onPressed: () =>
+                _runUiAction(context, () => controller.restoreDocument(id)),
+            icon: const Icon(Icons.restore),
+          ),
+        );
+      },
+    );
+  }
+}
+
+final class _RecycleBinView extends StatelessWidget {
+  const _RecycleBinView({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(
+          Icons.delete_sweep_outlined,
+          size: 72,
+          color: Theme.of(context).colorScheme.outline,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          controller.deletedDocuments.isEmpty
+              ? 'Корзина пуста'
+              : 'Выберите документ слева для восстановления',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 20),
+        OutlinedButton.icon(
+          onPressed: () =>
+              _runUiAction(context, () => controller.setRecycleBin(false)),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('К документам'),
         ),
       ],
     ),
@@ -307,17 +472,37 @@ final class DocumentEditor extends StatefulWidget {
 }
 
 final class _DocumentEditorState extends State<DocumentEditor> {
-  late final TextEditingController _title;
-  late final TextEditingController _content;
+  late TextEditingController _title;
+  late TextEditingController _content;
   late int _revision;
   String? _blockId;
   Timer? _autosave;
+  Future<void>? _activeSave;
+  bool _dirty = false;
   _SaveState _state = _SaveState.saved;
 
   @override
   void initState() {
     super.initState();
     _readDocument(widget.document);
+    widget.controller.attachEditor(this, _flushBeforeNavigation);
+  }
+
+  @override
+  void didUpdateWidget(DocumentEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final int incomingRevision = requireInt(widget.document, 'revision');
+    if (_state == _SaveState.conflict && incomingRevision != _revision) {
+      final List<JsonMap> blocks = requireMapList(widget.document, 'blocks');
+      _revision = incomingRevision;
+      _blockId = blocks.isEmpty ? null : blocks.first['block_id'] as String?;
+      _title.text = requireString(widget.document, 'title');
+      _content.text = blocks.isEmpty
+          ? ''
+          : (requireMap(blocks.first, 'payload')['text'] as String?) ?? '';
+      _dirty = false;
+      _state = _SaveState.saved;
+    }
   }
 
   void _readDocument(JsonMap document) {
@@ -332,6 +517,7 @@ final class _DocumentEditorState extends State<DocumentEditor> {
   }
 
   void _changed(String _) {
+    _dirty = true;
     _autosave?.cancel();
     setState(() => _state = _SaveState.pending);
     _autosave = Timer(const Duration(milliseconds: 700), () {
@@ -339,17 +525,39 @@ final class _DocumentEditorState extends State<DocumentEditor> {
     });
   }
 
-  Future<void> _save() async {
-    if (_state == _SaveState.saving) {
+  Future<void> _save({bool propagateError = false}) async {
+    final Future<void>? active = _activeSave;
+    if (active != null) {
+      await active;
+      if (_dirty) {
+        await _save(propagateError: propagateError);
+      }
       return;
     }
+    if (!_dirty) {
+      return;
+    }
+    final Future<void> save = _performSave(propagateError: propagateError);
+    _activeSave = save;
+    try {
+      await save;
+    } finally {
+      _activeSave = null;
+    }
+  }
+
+  Future<void> _performSave({required bool propagateError}) async {
     _autosave?.cancel();
-    setState(() => _state = _SaveState.saving);
+    final String title = _title.text;
+    final String content = _content.text;
+    if (mounted) {
+      setState(() => _state = _SaveState.saving);
+    }
     try {
       final JsonMap saved = await widget.controller.saveDocument(
         documentId: requireString(widget.document, 'document_id'),
-        title: _title.text,
-        text: _content.text,
+        title: title,
+        text: content,
         expectedRevision: _revision,
         blockId: _blockId,
       );
@@ -359,9 +567,21 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       _revision = requireInt(saved, 'revision');
       final List<JsonMap> blocks = requireMapList(saved, 'blocks');
       _blockId = blocks.isEmpty ? null : blocks.first['block_id'] as String?;
-      setState(() => _state = _SaveState.saved);
+      final bool unchanged = _title.text == title && _content.text == content;
+      _dirty = !unchanged;
+      setState(
+        () => _state = unchanged ? _SaveState.saved : _SaveState.pending,
+      );
+      if (!unchanged) {
+        _autosave = Timer(const Duration(milliseconds: 700), () {
+          unawaited(_save());
+        });
+      }
     } on LocalApiException catch (error) {
       if (!mounted) {
+        if (propagateError) {
+          rethrow;
+        }
         return;
       }
       setState(
@@ -369,16 +589,30 @@ final class _DocumentEditorState extends State<DocumentEditor> {
             ? _SaveState.conflict
             : _SaveState.failed,
       );
+      if (propagateError) {
+        rethrow;
+      }
     } on Object {
       if (mounted) {
         setState(() => _state = _SaveState.failed);
       }
+      if (propagateError) {
+        rethrow;
+      }
+    }
+  }
+
+  Future<void> _flushBeforeNavigation() async {
+    _autosave?.cancel();
+    while (_dirty) {
+      await _save(propagateError: true);
     }
   }
 
   @override
   void dispose() {
     _autosave?.cancel();
+    widget.controller.detachEditor(this);
     _title.dispose();
     _content.dispose();
     super.dispose();
@@ -407,7 +641,11 @@ final class _DocumentEditorState extends State<DocumentEditor> {
             const SizedBox(width: 8),
             IconButton(
               tooltip: 'Удалить документ',
-              onPressed: () => _confirmDelete(context),
+              onPressed: () => _deleteDocument(
+                context,
+                widget.controller,
+                requireString(widget.document, 'document_id'),
+              ),
               icon: const Icon(Icons.delete_outline),
             ),
           ],
@@ -443,29 +681,6 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       ],
     ),
   );
-
-  Future<void> _confirmDelete(BuildContext context) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Удалить документ?'),
-        content: const Text('Документ можно будет восстановить из корзины.'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Удалить'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await widget.controller.deleteSelectedDocument();
-    }
-  }
 }
 
 final class _SaveIndicator extends StatelessWidget {
@@ -513,22 +728,139 @@ Future<void> _createWorkspace(
     title: 'Новое пространство',
     hint: 'Например, Личное',
   );
-  if (name != null && name.trim().isNotEmpty) {
-    await controller.createWorkspace(name);
+  if (name != null && name.trim().isNotEmpty && context.mounted) {
+    _runUiAction(context, () => controller.createWorkspace(name));
   }
 }
 
 Future<void> _createDocument(
   BuildContext context,
-  AppController controller,
-) async {
+  AppController controller, {
+  String? parentId,
+}) async {
   final String? title = await _askText(
     context,
-    title: 'Новый документ',
+    title: parentId == null ? 'Новый документ' : 'Вложенный документ',
     hint: 'Название документа',
   );
-  if (title != null && title.trim().isNotEmpty) {
-    await controller.createDocument(title);
+  if (title != null && title.trim().isNotEmpty && context.mounted) {
+    _runUiAction(
+      context,
+      () => controller.createDocument(title, parentId: parentId),
+    );
+  }
+}
+
+Future<void> _moveDocument(
+  BuildContext context,
+  AppController controller,
+  JsonMap document,
+) async {
+  final String documentId = requireString(document, 'document_id');
+  String selectedParent = (document['parent_id'] as String?) ?? '';
+  final String? result = await showDialog<String>(
+    context: context,
+    builder: (BuildContext context) => StatefulBuilder(
+      builder: (BuildContext context, StateSetter setState) => AlertDialog(
+        title: const Text('Переместить документ'),
+        content: DropdownButtonFormField<String>(
+          initialValue: selectedParent,
+          decoration: const InputDecoration(labelText: 'Родитель'),
+          items: <DropdownMenuItem<String>>[
+            const DropdownMenuItem<String>(value: '', child: Text('В корень')),
+            ...controller
+                .validParentsFor(documentId)
+                .map(
+                  (JsonMap candidate) => DropdownMenuItem<String>(
+                    value: requireString(candidate, 'document_id'),
+                    child: Text(requireString(candidate, 'title')),
+                  ),
+                ),
+          ],
+          onChanged: (String? value) {
+            if (value != null) {
+              setState(() => selectedParent = value);
+            }
+          },
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, selectedParent),
+            child: const Text('Переместить'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (result != null && context.mounted) {
+    _runUiAction(
+      context,
+      () => controller.moveDocument(
+        documentId: documentId,
+        parentId: result.isEmpty ? null : result,
+      ),
+    );
+  }
+}
+
+Future<void> _deleteDocument(
+  BuildContext context,
+  AppController controller,
+  String documentId,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: const Text('Удалить документ?'),
+      content: const Text(
+        'Документ и вложенные документы попадут в корзину. '
+        'Их можно восстановить.',
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Удалить'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) {
+    _runUiAction(context, () => controller.deleteDocument(documentId));
+  }
+}
+
+void _runUiAction(BuildContext context, Future<void> Function() action) {
+  unawaited(_runUiActionAsync(context, action));
+}
+
+Future<void> _runUiActionAsync(
+  BuildContext context,
+  Future<void> Function() action,
+) async {
+  try {
+    await action();
+  } on LocalApiException catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  } on Object {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось выполнить локальную операцию.'),
+        ),
+      );
+    }
   }
 }
 

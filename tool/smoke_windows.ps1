@@ -70,6 +70,33 @@ try {
         $workspace.workspace_id,
         'OfflineNote'
     )
+    $child = Invoke-CliJson @(
+        'document',
+        'create',
+        $workspace.workspace_id,
+        'NestedNote'
+    )
+    $null = Invoke-CliJson @(
+        'document',
+        'move',
+        $child.document_id,
+        $document.document_id
+    )
+    $null = Invoke-CliJson @(
+        'document',
+        'delete',
+        $document.document_id
+    )
+    $null = Invoke-CliJson @(
+        'document',
+        'restore',
+        $document.document_id
+    )
+    $null = Invoke-CliJson @(
+        'document',
+        'restore',
+        $child.document_id
+    )
 
     $firstEndpoint = Get-Content -Raw $endpointPath | ConvertFrom-Json
     Stop-SmokeDaemon $firstEndpoint.process_id
@@ -89,6 +116,7 @@ try {
         Health = $health.status
         Workspace = $workspace.name
         Document = $restored.title
+        TreeRecycle = $true
         ColdRestart = $true
         ExternalProxyBlocked = $true
         Profile = $smokeRoot

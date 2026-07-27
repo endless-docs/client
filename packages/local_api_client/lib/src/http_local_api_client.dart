@@ -109,6 +109,24 @@ final class HttpLocalApiClient implements EndlessLocalApi {
   );
 
   @override
+  Future<JsonMap> moveDocument({
+    required String commandId,
+    required String documentId,
+    required String? parentId,
+    required int position,
+    int? expectedRevision,
+  }) => _command(
+    commandId: commandId,
+    method: 'MoveDocument',
+    payload: <String, Object?>{
+      'document_id': documentId,
+      'parent_id': parentId,
+      'position': position,
+      'expected_revision': expectedRevision,
+    },
+  );
+
+  @override
   Future<JsonMap> deleteDocument({
     required String commandId,
     required String documentId,

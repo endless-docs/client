@@ -119,6 +119,75 @@ void main() {
       ),
     );
   });
+
+  test(
+    'deleting a parent tombstones its subtree and restores in order',
+    () async {
+      final CommandReceipt workspace = await service.createWorkspace(
+        commandId: 'workspace',
+        name: 'Personal',
+      );
+      final String workspaceId = workspace.result['workspace_id']! as String;
+      final CommandReceipt parent = await service.createDocument(
+        commandId: 'parent',
+        workspaceId: workspaceId,
+        title: 'Parent',
+      );
+      final String parentId = parent.result['document_id']! as String;
+      final CommandReceipt child = await service.createDocument(
+        commandId: 'child',
+        workspaceId: workspaceId,
+        title: 'Child',
+        parentId: parentId,
+      );
+      final String childId = child.result['document_id']! as String;
+
+      final CommandReceipt deleted = await service.deleteDocument(
+        commandId: 'delete-tree',
+        documentId: parentId,
+        expectedRevision: 1,
+      );
+
+      expect(
+        deleted.result['affected_document_ids'],
+        containsAll(<String>[parentId, childId]),
+      );
+      expect(
+        await service.listDocuments(workspaceId, includeDeleted: true),
+        everyElement(
+          isA<Document>().having(
+            (Document document) => document.isDeleted,
+            'isDeleted',
+            isTrue,
+          ),
+        ),
+      );
+      await expectLater(
+        service.restoreDocument(
+          commandId: 'restore-child-too-early',
+          documentId: childId,
+        ),
+        throwsA(
+          isA<ApplicationException>().having(
+            (ApplicationException error) => error.code,
+            'code',
+            'InvalidParent',
+          ),
+        ),
+      );
+
+      await service.restoreDocument(
+        commandId: 'restore-parent',
+        documentId: parentId,
+      );
+      await service.restoreDocument(
+        commandId: 'restore-child',
+        documentId: childId,
+      );
+
+      expect(await service.listDocuments(workspaceId), hasLength(2));
+    },
+  );
 }
 
 final class _FixedClock implements Clock {

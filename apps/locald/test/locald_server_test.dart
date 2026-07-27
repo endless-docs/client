@@ -64,6 +64,58 @@ void main() {
         ],
         expectedRevision: requireInt(document, 'revision'),
       );
+      final JsonMap child = await client.createDocument(
+        commandId: 'child-command',
+        workspaceId: requireString(workspace, 'workspace_id'),
+        title: 'Nested note',
+        parentId: requireString(saved, 'document_id'),
+      );
+      final JsonMap deletedParent = await client.deleteDocument(
+        commandId: 'delete-tree-command',
+        documentId: requireString(saved, 'document_id'),
+        expectedRevision: requireInt(saved, 'revision'),
+      );
+      final List<JsonMap> recycle = await client.listDocuments(
+        workspaceId: requireString(workspace, 'workspace_id'),
+        includeDeleted: true,
+      );
+      expect(recycle, hasLength(2));
+      expect(
+        recycle,
+        everyElement(
+          isA<JsonMap>().having(
+            (JsonMap item) => item['is_deleted'],
+            'is_deleted',
+            isTrue,
+          ),
+        ),
+      );
+      await expectLater(
+        client.restoreDocument(
+          commandId: 'restore-child-too-early',
+          documentId: requireString(child, 'document_id'),
+        ),
+        throwsA(
+          isA<LocalApiException>().having(
+            (LocalApiException error) => error.code,
+            'code',
+            'InvalidParent',
+          ),
+        ),
+      );
+      await client.restoreDocument(
+        commandId: 'restore-parent-command',
+        documentId: requireString(saved, 'document_id'),
+        expectedRevision: requireInt(deletedParent, 'revision'),
+      );
+      final JsonMap deletedChild = await client.getDocument(
+        requireString(child, 'document_id'),
+      );
+      await client.restoreDocument(
+        commandId: 'restore-child-command',
+        documentId: requireString(child, 'document_id'),
+        expectedRevision: requireInt(deletedChild, 'revision'),
+      );
 
       expect(await _unauthenticatedStatus(endpoint), HttpStatus.unauthorized);
       await client.close();
@@ -97,7 +149,7 @@ void main() {
         await client.listDocuments(
           workspaceId: requireString(workspace, 'workspace_id'),
         ),
-        hasLength(1),
+        hasLength(2),
       );
     },
     timeout: const Timeout(Duration(minutes: 2)),

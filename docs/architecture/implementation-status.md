@@ -43,6 +43,10 @@ Flutter UI / CLI
 - workspace/document mutation и Operation Log находятся в одной Isar
   transaction;
 - document revision conflict не оставляет partial state;
+- pending editor state flushes before navigation, а availability retry сохраняет
+  исходный `command_id`;
+- document tree move и subtree delete/recycle/ordered restore проходят через тот
+  же application pipeline;
 - release bundle содержит Flutter UI, CLI, `locald` и native Isar library;
 - packaged CLI создаёт и читает данные после forced `locald` restart при
   недоступном внешнем proxy.
@@ -75,19 +79,20 @@ Bundle появляется в `dist/endless-windows-x64`. Isar native library �
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
 | Start without network/account | Packaged UI/CLI bootstrap uses bundled `locald` and Isar; no identity code | Proven for Windows vertical slice |
-| Workspace/document workflow | Widget + application + `locald` integration tests | Partial: create/read/edit/delete implemented |
+| Workspace/document workflow | Widget + application + `locald` integration tests | Proven for create/read/edit/move/subtree delete/restore |
 | Only `locald` opens Isar | Import checker and package graph | Proven |
 | Durable acknowledgement | Isar close/reopen and packaged forced-restart smoke | Proven for implemented mutations |
 | Command idempotency | Application and `locald` replay tests | Proven |
 | Operation atomicity | Same Isar transaction adapter + rollback/replay tests | Partial: additional write-step fault injection required |
-| Offline editor recovery | Autosave pending/error/conflict widget states | Partial: process reconnect UX needs an end-to-end test |
+| Offline editor recovery | Autosave, flush-before-navigation and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
 | Release build | Windows release bundle build script | Proven; installer/signing not implemented |
 
 ## Known gaps
 
 Полная Client MVP пока не достигнута. Обязательные следующие work packages:
 
-1. Complete workspace lifecycle, tree move UI и recycle/restore UI.
+1. Complete workspace rename/archive/delete lifecycle, multi-block editor и
+   window-close flush.
 2. Search projection и rebuild.
 3. Managed attachments со staging journal и traversal/symlink corpus.
 4. Versioned import/export и backup/restore с clean-profile round trip.

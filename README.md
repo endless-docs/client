@@ -11,8 +11,9 @@
 
 Реализован проверяемый Windows-first vertical slice:
 
-- Flutter UI создаёт local workspaces и documents, редактирует текст и показывает
-  состояния autosave/retry/conflict;
+- Flutter UI создаёт local workspaces и document tree, редактирует текст,
+  перемещает документы, восстанавливает их из корзины и показывает состояния
+  autosave/retry/conflict;
 - отдельный pure Dart process `locald` — единственный владелец Isar;
 - UI и CLI подключаются через authenticated Local API на `127.0.0.1`;
 - domain mutation, command outcome, Operation Log и event sequence фиксируются

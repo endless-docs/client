@@ -11,6 +11,13 @@ enum AppPhase { starting, ready, failed }
 
 typedef LocalApiBootstrap = Future<EndlessLocalApi> Function();
 
+final class DocumentTreeEntry {
+  const DocumentTreeEntry({required this.document, required this.depth});
+
+  final JsonMap document;
+  final int depth;
+}
+
 final class AppController extends ChangeNotifier {
   AppController({required LocalApiBootstrap bootstrap})
     : _bootstrap = bootstrap;
@@ -36,9 +43,13 @@ final class AppController extends ChangeNotifier {
 
   final LocalApiBootstrap _bootstrap;
   EndlessLocalApi? _client;
+  Object? _editorOwner;
+  Future<void> Function()? _flushEditor;
 
   AppPhase phase = AppPhase.starting;
   String? errorMessage;
+  bool reconnecting = false;
+  bool showRecycleBin = false;
   List<JsonMap> workspaces = <JsonMap>[];
   List<JsonMap> documents = <JsonMap>[];
   String? selectedWorkspaceId;
@@ -50,11 +61,99 @@ final class AppController extends ChangeNotifier {
       return null;
     }
     for (final JsonMap document in documents) {
-      if (document['document_id'] == id) {
+      if (document['document_id'] == id && document['is_deleted'] != true) {
         return document;
       }
     }
     return null;
+  }
+
+  List<JsonMap> get activeDocuments => documents
+      .where((JsonMap document) => document['is_deleted'] != true)
+      .toList(growable: false);
+
+  List<JsonMap> get deletedDocuments =>
+      documents
+          .where((JsonMap document) => document['is_deleted'] == true)
+          .toList(growable: false)
+        ..sort(
+          (JsonMap left, JsonMap right) => requireString(
+            right,
+            'updated_at',
+          ).compareTo(requireString(left, 'updated_at')),
+        );
+
+  List<DocumentTreeEntry> get documentTree {
+    final List<JsonMap> active = activeDocuments;
+    final Set<String> knownIds = active
+        .map((JsonMap document) => requireString(document, 'document_id'))
+        .toSet();
+    final Map<String?, List<JsonMap>> children = <String?, List<JsonMap>>{};
+    for (final JsonMap document in active) {
+      final String? requestedParent = document['parent_id'] as String?;
+      final String? parent =
+          requestedParent != null && knownIds.contains(requestedParent)
+          ? requestedParent
+          : null;
+      children.putIfAbsent(parent, () => <JsonMap>[]).add(document);
+    }
+    for (final List<JsonMap> siblings in children.values) {
+      siblings.sort((JsonMap left, JsonMap right) {
+        final int position = requireInt(
+          left,
+          'position',
+        ).compareTo(requireInt(right, 'position'));
+        return position != 0
+            ? position
+            : requireString(
+                left,
+                'title',
+              ).compareTo(requireString(right, 'title'));
+      });
+    }
+    final List<DocumentTreeEntry> result = <DocumentTreeEntry>[];
+    final Set<String> visited = <String>{};
+    void append(String? parentId, int depth) {
+      for (final JsonMap document in children[parentId] ?? const <JsonMap>[]) {
+        final String id = requireString(document, 'document_id');
+        if (!visited.add(id)) {
+          continue;
+        }
+        result.add(DocumentTreeEntry(document: document, depth: depth));
+        append(id, depth + 1);
+      }
+    }
+
+    append(null, 0);
+    for (final JsonMap document in active) {
+      final String id = requireString(document, 'document_id');
+      if (visited.add(id)) {
+        result.add(DocumentTreeEntry(document: document, depth: 0));
+      }
+    }
+    return result;
+  }
+
+  List<JsonMap> validParentsFor(String documentId) {
+    final Set<String> excluded = <String>{documentId};
+    bool changed;
+    do {
+      changed = false;
+      for (final JsonMap document in activeDocuments) {
+        final String id = requireString(document, 'document_id');
+        if (!excluded.contains(id) &&
+            excluded.contains(document['parent_id'])) {
+          excluded.add(id);
+          changed = true;
+        }
+      }
+    } while (changed);
+    return activeDocuments
+        .where(
+          (JsonMap document) =>
+              !excluded.contains(requireString(document, 'document_id')),
+        )
+        .toList(growable: false);
   }
 
   Future<void> initialize() async {
@@ -77,8 +176,26 @@ final class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void attachEditor(Object owner, Future<void> Function() flush) {
+    _editorOwner = owner;
+    _flushEditor = flush;
+  }
+
+  void detachEditor(Object owner) {
+    if (identical(_editorOwner, owner)) {
+      _editorOwner = null;
+      _flushEditor = null;
+    }
+  }
+
+  Future<void> flushPendingChanges() async {
+    await _flushEditor?.call();
+  }
+
   Future<void> _loadWorkspaces() async {
-    workspaces = await _requireClient().listWorkspaces();
+    workspaces = await _withReconnect(
+      (EndlessLocalApi client) => client.listWorkspaces(),
+    );
     if (workspaces.isEmpty) {
       selectedWorkspaceId = null;
       selectedDocumentId = null;
@@ -101,50 +218,86 @@ final class AppController extends ChangeNotifier {
       selectedDocumentId = null;
       return;
     }
-    documents = await _requireClient().listDocuments(workspaceId: workspaceId);
-    final bool selectedStillExists = documents.any(
+    documents = await _withReconnect(
+      (EndlessLocalApi client) =>
+          client.listDocuments(workspaceId: workspaceId, includeDeleted: true),
+    );
+    final bool selectedStillExists = activeDocuments.any(
       (JsonMap document) => document['document_id'] == selectedDocumentId,
     );
     selectedDocumentId = selectedStillExists
         ? selectedDocumentId
-        : documents.isEmpty
+        : showRecycleBin || activeDocuments.isEmpty
         ? null
-        : requireString(documents.first, 'document_id');
+        : requireString(activeDocuments.first, 'document_id');
   }
 
   Future<void> selectWorkspace(String workspaceId) async {
+    if (workspaceId == selectedWorkspaceId) {
+      return;
+    }
+    await flushPendingChanges();
     selectedWorkspaceId = workspaceId;
     selectedDocumentId = null;
+    showRecycleBin = false;
     await _loadDocuments();
     notifyListeners();
   }
 
-  void selectDocument(String documentId) {
+  Future<void> selectDocument(String documentId) async {
+    if (documentId == selectedDocumentId) {
+      return;
+    }
+    await flushPendingChanges();
     selectedDocumentId = documentId;
+    showRecycleBin = false;
+    notifyListeners();
+  }
+
+  Future<void> setRecycleBin(bool value) async {
+    if (value == showRecycleBin) {
+      return;
+    }
+    await flushPendingChanges();
+    showRecycleBin = value;
+    selectedDocumentId = null;
+    if (!value && activeDocuments.isNotEmpty) {
+      selectedDocumentId = requireString(activeDocuments.first, 'document_id');
+    }
     notifyListeners();
   }
 
   Future<void> createWorkspace(String name) async {
-    final JsonMap created = await _requireClient().createWorkspace(
-      commandId: _commandId(),
-      name: name,
+    await flushPendingChanges();
+    final String commandId = _commandId();
+    final JsonMap created = await _withReconnect(
+      (EndlessLocalApi client) =>
+          client.createWorkspace(commandId: commandId, name: name),
     );
     await _loadWorkspaces();
     selectedWorkspaceId = requireString(created, 'workspace_id');
+    selectedDocumentId = null;
+    showRecycleBin = false;
     await _loadDocuments();
     notifyListeners();
   }
 
-  Future<void> createDocument(String title) async {
+  Future<void> createDocument(String title, {String? parentId}) async {
+    await flushPendingChanges();
     final String? workspaceId = selectedWorkspaceId;
     if (workspaceId == null) {
       throw StateError('Select a workspace first.');
     }
-    final JsonMap created = await _requireClient().createDocument(
-      commandId: _commandId(),
-      workspaceId: workspaceId,
-      title: title,
+    final String commandId = _commandId();
+    final JsonMap created = await _withReconnect(
+      (EndlessLocalApi client) => client.createDocument(
+        commandId: commandId,
+        workspaceId: workspaceId,
+        title: title,
+        parentId: parentId,
+      ),
     );
+    showRecycleBin = false;
     await _loadDocuments();
     selectedDocumentId = requireString(created, 'document_id');
     notifyListeners();
@@ -157,27 +310,55 @@ final class AppController extends ChangeNotifier {
     required int expectedRevision,
     String? blockId,
   }) async {
-    final JsonMap saved = await _requireClient().saveDocument(
-      commandId: _commandId(),
-      documentId: documentId,
-      title: title,
-      blocks: <JsonMap>[
-        <String, Object?>{
-          'block_id': blockId,
-          'type': 'paragraph',
-          'payload': <String, Object?>{'text': text},
-        },
-      ],
-      expectedRevision: expectedRevision,
+    final String commandId = _commandId();
+    final JsonMap saved = await _withReconnect(
+      (EndlessLocalApi client) => client.saveDocument(
+        commandId: commandId,
+        documentId: documentId,
+        title: title,
+        blocks: <JsonMap>[
+          <String, Object?>{
+            'block_id': blockId,
+            'type': 'paragraph',
+            'payload': <String, Object?>{'text': text},
+          },
+        ],
+        expectedRevision: expectedRevision,
+      ),
     );
-    final int index = documents.indexWhere(
-      (JsonMap document) => document['document_id'] == documentId,
-    );
-    if (index >= 0) {
-      documents[index] = saved;
-      notifyListeners();
-    }
+    _replaceDocument(saved);
+    notifyListeners();
     return saved;
+  }
+
+  Future<void> moveDocument({
+    required String documentId,
+    required String? parentId,
+  }) async {
+    if (documentId == selectedDocumentId) {
+      await flushPendingChanges();
+    }
+    final JsonMap document = _documentById(documentId);
+    final int position = activeDocuments
+        .where(
+          (JsonMap candidate) =>
+              candidate['parent_id'] == parentId &&
+              candidate['document_id'] != documentId,
+        )
+        .length;
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.moveDocument(
+        commandId: commandId,
+        documentId: documentId,
+        parentId: parentId,
+        position: position,
+        expectedRevision: requireInt(document, 'revision'),
+      ),
+    );
+    await _loadDocuments();
+    selectedDocumentId = documentId;
+    notifyListeners();
   }
 
   Future<void> deleteSelectedDocument() async {
@@ -185,12 +366,40 @@ final class AppController extends ChangeNotifier {
     if (document == null) {
       return;
     }
-    await _requireClient().deleteDocument(
-      commandId: _commandId(),
-      documentId: requireString(document, 'document_id'),
-      expectedRevision: requireInt(document, 'revision'),
+    await deleteDocument(requireString(document, 'document_id'));
+  }
+
+  Future<void> deleteDocument(String documentId) async {
+    await flushPendingChanges();
+    final JsonMap document = _documentById(documentId);
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.deleteDocument(
+        commandId: commandId,
+        documentId: documentId,
+        expectedRevision: requireInt(document, 'revision'),
+      ),
     );
-    selectedDocumentId = null;
+    if (selectedDocumentId == documentId ||
+        !activeDocuments.any(
+          (JsonMap candidate) => candidate['document_id'] == selectedDocumentId,
+        )) {
+      selectedDocumentId = null;
+    }
+    await _loadDocuments();
+    notifyListeners();
+  }
+
+  Future<void> restoreDocument(String documentId) async {
+    final JsonMap document = _documentById(documentId);
+    final String commandId = _commandId();
+    await _withReconnect(
+      (EndlessLocalApi client) => client.restoreDocument(
+        commandId: commandId,
+        documentId: documentId,
+        expectedRevision: requireInt(document, 'revision'),
+      ),
+    );
     await _loadDocuments();
     notifyListeners();
   }
@@ -200,15 +409,62 @@ final class AppController extends ChangeNotifier {
     if (documentId == null) {
       return;
     }
-    final JsonMap document = await _requireClient().getDocument(documentId);
+    final JsonMap document = await _withReconnect(
+      (EndlessLocalApi client) => client.getDocument(documentId),
+    );
+    _replaceDocument(document);
+    notifyListeners();
+  }
+
+  JsonMap _documentById(String documentId) {
+    for (final JsonMap document in documents) {
+      if (document['document_id'] == documentId) {
+        return document;
+      }
+    }
+    throw StateError('Document is not loaded.');
+  }
+
+  void _replaceDocument(JsonMap document) {
+    final String documentId = requireString(document, 'document_id');
     final int index = documents.indexWhere(
       (JsonMap candidate) => candidate['document_id'] == documentId,
     );
     if (index >= 0) {
       documents[index] = document;
     }
-    notifyListeners();
   }
+
+  Future<T> _withReconnect<T>(
+    Future<T> Function(EndlessLocalApi client) operation,
+  ) async {
+    try {
+      return await operation(_requireClient());
+    } on LocalApiException catch (error) {
+      if (!_isAvailabilityError(error)) {
+        rethrow;
+      }
+      reconnecting = true;
+      notifyListeners();
+      try {
+        await _client?.close();
+        _client = await _bootstrap();
+        return await operation(_requireClient());
+      } finally {
+        reconnecting = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  static bool _isAvailabilityError(LocalApiException error) =>
+      error.retryable &&
+      <String>{
+        'LocaldUnavailable',
+        'LocaldStarting',
+        'DeadlineExceeded',
+        'StorageBusy',
+      }.contains(error.code);
 
   EndlessLocalApi _requireClient() {
     final EndlessLocalApi? client = _client;
@@ -229,6 +485,8 @@ final class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _editorOwner = null;
+    _flushEditor = null;
     final EndlessLocalApi? client = _client;
     if (client != null) {
       unawaited(client.close());
