@@ -54,8 +54,10 @@ Flutter UI / CLI
   же application pipeline;
 - search projection обновляется в domain transaction, исключает tombstones,
   возвращает indexed sequence и перестраивается из authoritative documents;
-- schema v1→v2 post-upgrade state без projection автоматически repair-ится до
-  публикации `locald` endpoint; сценарий воспроизводится на real Isar profile;
+- real schema v1 fixture открывается schema v2 adapter без потери blocks;
+  legacy sentinel нормализуется, а search repair завершается до readiness;
+- deterministic real-Isar fault matrix откатывает document, block, projection,
+  sequence, Operation и CommandOutcome writes и допускает safe same-ID retry;
 - release bundle содержит Flutter UI, CLI, `locald` и native Isar library;
 - packaged CLI создаёт и читает данные после forced `locald` restart при
   недоступном внешнем proxy.
@@ -94,7 +96,7 @@ rebuild.
 | Only `locald` opens Isar | Import checker and package graph | Proven |
 | Durable acknowledgement | Isar close/reopen and packaged forced-restart smoke | Proven for implemented mutations |
 | Command idempotency | Application and `locald` replay tests | Proven |
-| Operation atomicity | Same Isar transaction adapter + rollback/replay tests | Partial: additional write-step fault injection required |
+| Operation atomicity | Real Isar fault injection at document/block/projection/sequence/operation/outcome writes plus durable retry after reopen | Proven for injected exceptions; process-kill-during-commit evidence pending |
 | Offline editor recovery | Autosave, flush-before-navigation, exit-request flush and same-ID reconnect tests | Partial: long disconnect/event subscription pending |
 | Rebuildable local search | Application update/delete/restore/rebuild tests, real Isar/locald post-upgrade repair and cold-reopen tests, widget result UX and packaged smoke | Proven for correctness; 10k/100k benchmark and D6 decision pending |
 | Release build | Windows release bundle build script | Proven; installer/signing not implemented |
@@ -108,7 +110,8 @@ rebuild.
 3. Versioned import/export и backup/restore с clean-profile round trip.
 4. MCP adapter, scopes, approval и audit.
 5. Event subscription/reconnect и multi-client concurrency.
-6. Migration fixtures, disk-full/permission/fault-injection matrix.
+6. Disk-full/permission and process-kill-during-commit matrix; add a versioned
+   fixture for every future schema.
 7. Search 10k/100k benchmark, решение D6 и long offline soak.
 8. Installer, signing policy, diagnostics, SBOM, license/notices и clean-machine
    release matrix.

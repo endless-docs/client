@@ -9,10 +9,28 @@ import 'package:isar_community/isar.dart';
 
 import 'records.dart';
 
+enum IsarWriteStep {
+  workspaceRecord,
+  documentRecord,
+  blockDelete,
+  blockPut,
+  searchProjectionPut,
+  searchProjectionDelete,
+  searchProjectionReplace,
+  searchProjectionReplacePut,
+  searchCheckpoint,
+  eventSequence,
+  commandOutcome,
+  operationRecord,
+}
+
+typedef IsarFaultInjector = void Function(IsarWriteStep step);
+
 final class IsarClientStore implements ClientStore {
-  IsarClientStore._(this._isar);
+  IsarClientStore._(this._isar, this._faultInjector);
 
   final Isar _isar;
+  final IsarFaultInjector? _faultInjector;
 
   static bool _coreInitialized = false;
 
@@ -21,6 +39,7 @@ final class IsarClientStore implements ClientStore {
     String? nativeLibraryPath,
     bool allowDevelopmentDownload = false,
     String instanceName = 'endless',
+    IsarFaultInjector? faultInjector,
   }) async {
     await Directory(directory).create(recursive: true);
     if (!_coreInitialized) {
@@ -50,7 +69,7 @@ final class IsarClientStore implements ClientStore {
       relaxedDurability: false,
       inspector: false,
     );
-    return IsarClientStore._(isar);
+    return IsarClientStore._(isar, faultInjector);
   }
 
   Future<void> close() => _isar.close();
@@ -63,7 +82,9 @@ final class IsarClientStore implements ClientStore {
   @override
   Future<T> write<T>(
     FutureOr<T> Function(ClientStoreWriter writer) operation,
-  ) => _isar.writeTxn<T>(() async => operation(_IsarWriter(_isar)));
+  ) => _isar.writeTxn<T>(
+    () async => operation(_IsarWriter(_isar, _faultInjector)),
+  );
 
   static Abi _currentAbi() {
     if (Platform.isWindows) {
@@ -183,7 +204,7 @@ class _IsarReader implements ClientStoreReader {
     required int limit,
   }) async {
     final RuntimeStateRecord? state = await isar.runtimeStateRecords.get(1);
-    final int indexedSequence = state?.searchIndexedSequence ?? 0;
+    final int indexedSequence = _sequenceOrZero(state?.searchIndexedSequence);
     final List<String> terms = _normalizeSearchText(
       query,
     ).split(' ').where((String term) => term.isNotEmpty).toList();
@@ -234,7 +255,7 @@ class _IsarReader implements ClientStoreReader {
     final RuntimeStateRecord? state = await isar.runtimeStateRecords.get(1);
     return SearchStatus(
       eventSequence: state?.eventSequence ?? 0,
-      indexedSequence: state?.searchIndexedSequence ?? 0,
+      indexedSequence: _sequenceOrZero(state?.searchIndexedSequence),
       documentCount: await isar.searchProjectionRecords.count(),
     );
   }
@@ -290,7 +311,11 @@ class _IsarReader implements ClientStoreReader {
 }
 
 final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
-  const _IsarWriter(super.isar);
+  const _IsarWriter(super.isar, this.faultInjector);
+
+  final IsarFaultInjector? faultInjector;
+
+  void _hit(IsarWriteStep step) => faultInjector?.call(step);
 
   @override
   Future<void> putWorkspace(Workspace workspace) async {
@@ -310,6 +335,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
       ..revision = workspace.revision
       ..createdAt = workspace.createdAt
       ..updatedAt = workspace.updatedAt;
+    _hit(IsarWriteStep.workspaceRecord);
     await isar.workspaceRecords.put(record);
   }
 
@@ -334,6 +360,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
       ..isDeleted = document.isDeleted
       ..createdAt = document.createdAt
       ..updatedAt = document.updatedAt;
+    _hit(IsarWriteStep.documentRecord);
     await isar.documentRecords.put(record);
 
     final List<BlockRecord> allBlocks = await isar.blockRecords
@@ -343,7 +370,9 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
         .where((BlockRecord block) => block.documentId == document.id)
         .map((BlockRecord block) => block.id)
         .toList();
+    _hit(IsarWriteStep.blockDelete);
     await isar.blockRecords.deleteAll(staleIds);
+    _hit(IsarWriteStep.blockPut);
     await isar.blockRecords.putAll(
       document.blocks
           .map(
@@ -368,6 +397,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
             .findFirst() ??
         SearchProjectionRecord();
     _writeSearchProjection(record, projection);
+    _hit(IsarWriteStep.searchProjectionPut);
     await isar.searchProjectionRecords.put(record);
   }
 
@@ -378,6 +408,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
         .documentIdEqualTo(documentId)
         .findFirst();
     if (record != null) {
+      _hit(IsarWriteStep.searchProjectionDelete);
       await isar.searchProjectionRecords.delete(record.id);
     }
   }
@@ -389,7 +420,9 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
     final List<int> ids = (await isar.searchProjectionRecords.where().findAll())
         .map((SearchProjectionRecord record) => record.id)
         .toList();
+    _hit(IsarWriteStep.searchProjectionReplace);
     await isar.searchProjectionRecords.deleteAll(ids);
+    _hit(IsarWriteStep.searchProjectionReplacePut);
     await isar.searchProjectionRecords.putAll(
       projections
           .map(
@@ -408,6 +441,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
           ..eventSequence = 0
           ..searchIndexedSequence = 0);
     state.searchIndexedSequence = sequence;
+    _hit(IsarWriteStep.searchCheckpoint);
     await isar.runtimeStateRecords.put(state);
   }
 
@@ -419,6 +453,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
           ..eventSequence = 0
           ..searchIndexedSequence = 0);
     state.eventSequence += 1;
+    _hit(IsarWriteStep.eventSequence);
     await isar.runtimeStateRecords.put(state);
     return state.eventSequence;
   }
@@ -431,6 +466,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
       ..fingerprint = outcome.fingerprint
       ..resultJson = jsonEncode(outcome.result)
       ..commitSequence = outcome.commitSequence;
+    _hit(IsarWriteStep.commandOutcome);
     await isar.commandOutcomeRecords.put(record);
   }
 
@@ -446,6 +482,7 @@ final class _IsarWriter extends _IsarReader implements ClientStoreWriter {
       ..resultRevision = operation.resultRevision
       ..payloadJson = jsonEncode(operation.payload)
       ..createdAt = operation.createdAt;
+    _hit(IsarWriteStep.operationRecord);
     await isar.operationRecords.put(record);
   }
 }
@@ -478,6 +515,8 @@ BlockType _blockType(String value) {
 
 String _normalizeSearchText(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+
+int _sequenceOrZero(int? value) => value == null || value < 0 ? 0 : value;
 
 String _searchSnippet(String content, List<String> terms) {
   if (content.isEmpty) {
