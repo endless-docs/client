@@ -29,11 +29,13 @@ final class CodexRuntime {
     required this.executable,
     required this.version,
     required this.supportsStrictConfig,
+    required this.runInShell,
   });
 
   final String executable;
   final String version;
   final bool supportsStrictConfig;
+  final bool runInShell;
 }
 
 final class CodexRuntimeDiscovery {
@@ -53,9 +55,11 @@ final class CodexRuntimeDiscovery {
     }
     final ProcessResult result;
     try {
-      result = await Process.run(executable, const <String>[
-        '--version',
-      ]).timeout(const Duration(seconds: 10));
+      result = await Process.run(
+        executable,
+        const <String>['--version'],
+        runInShell: _requiresShell(executable),
+      ).timeout(const Duration(seconds: 10));
     } on Object {
       throw const CodexException(
         'CodexUnavailable',
@@ -77,10 +81,11 @@ final class CodexRuntimeDiscovery {
     }
     final ProcessResult help;
     try {
-      help = await Process.run(executable, const <String>[
-        'app-server',
-        '--help',
-      ]).timeout(const Duration(seconds: 10));
+      help = await Process.run(
+        executable,
+        const <String>['app-server', '--help'],
+        runInShell: _requiresShell(executable),
+      ).timeout(const Duration(seconds: 10));
     } on Object {
       throw const CodexException(
         'CodexUnsupported',
@@ -97,36 +102,46 @@ final class CodexRuntimeDiscovery {
       executable: executable,
       version: version,
       supportsStrictConfig: '${help.stdout}'.contains('--strict-config'),
+      runInShell: _requiresShell(executable),
     );
   }
 
   Future<String> _findOnPath() async {
-    final List<String> arguments = Platform.isWindows
-        ? const <String>['codex.exe']
-        : const <String>['codex'];
     final String command = Platform.isWindows ? 'where.exe' : 'which';
-    try {
-      final ProcessResult result = await Process.run(
-        command,
-        arguments,
-      ).timeout(const Duration(seconds: 5));
-      if (result.exitCode == 0) {
-        for (final String candidate in const LineSplitter().convert(
-          '${result.stdout}',
-        )) {
-          final String path = candidate.trim();
-          if (path.isNotEmpty && await File(path).exists()) {
-            return File(path).absolute.path;
+    final List<String> names = Platform.isWindows
+        ? const <String>['codex.cmd', 'codex.exe']
+        : const <String>['codex'];
+    for (final String name in names) {
+      try {
+        final ProcessResult result = await Process.run(command, <String>[
+          name,
+        ]).timeout(const Duration(seconds: 5));
+        if (result.exitCode == 0) {
+          for (final String candidate in const LineSplitter().convert(
+            '${result.stdout}',
+          )) {
+            final String path = candidate.trim();
+            if (path.isNotEmpty && await File(path).exists()) {
+              return File(path).absolute.path;
+            }
           }
         }
+      } on Object {
+        // Try the next supported launcher before reporting a stable error.
       }
-    } on Object {
-      // Mapped to a stable product error below.
     }
     throw const CodexException(
       'CodexNotFound',
       'Локальный Codex не установлен. Установите Codex и выполните codex login.',
     );
+  }
+
+  bool _requiresShell(String executable) {
+    if (!Platform.isWindows) {
+      return false;
+    }
+    final String lower = executable.toLowerCase();
+    return lower.endsWith('.cmd') || lower.endsWith('.bat');
   }
 }
 
@@ -143,35 +158,43 @@ final class ProcessCodexTransport implements CodexTransport {
 
   final Process _process;
 
-  static Future<ProcessCodexTransport> start(CodexRuntime runtime) async {
+  static Future<ProcessCodexTransport> start(
+    CodexRuntime runtime, {
+    bool strictConfig = true,
+  }) async {
     final Process process;
     try {
-      process = await Process.start(runtime.executable, <String>[
-        'app-server',
-        if (runtime.supportsStrictConfig) '--strict-config',
-        '-c',
-        'service_tier="fast"',
-        '-c',
-        'web_search="disabled"',
-        '-c',
-        'features.shell_tool=false',
-        '-c',
-        'features.unified_exec=false',
-        '-c',
-        'features.multi_agent=false',
-        '-c',
-        'features.multi_agent_v2=false',
-        '-c',
-        'features.apps=false',
-        '-c',
-        'features.enable_mcp_apps=false',
-        '-c',
-        'features.remote_plugin=false',
-        '-c',
-        'features.plugins=false',
-        '-c',
-        'mcp_servers={}',
-      ], mode: ProcessStartMode.normal);
+      process = await Process.start(
+        runtime.executable,
+        <String>[
+          'app-server',
+          if (runtime.supportsStrictConfig && strictConfig) '--strict-config',
+          '-c',
+          'service_tier="fast"',
+          '-c',
+          'web_search="disabled"',
+          '-c',
+          'features.shell_tool=false',
+          '-c',
+          'features.unified_exec=false',
+          '-c',
+          'features.multi_agent=false',
+          '-c',
+          'features.multi_agent_v2=false',
+          '-c',
+          'features.apps=false',
+          '-c',
+          'features.enable_mcp_apps=false',
+          '-c',
+          'features.remote_plugin=false',
+          '-c',
+          'features.plugins=false',
+          '-c',
+          'mcp_servers={}',
+        ],
+        mode: ProcessStartMode.normal,
+        runInShell: runtime.runInShell,
+      );
     } on Object {
       throw const CodexException(
         'CodexUnavailable',
@@ -245,10 +268,18 @@ final class CodexAppServerClient {
     CodexRuntimeDiscovery discovery = const CodexRuntimeDiscovery(),
   }) async {
     final CodexRuntime runtime = await discovery.discover();
-    final ProcessCodexTransport transport = await ProcessCodexTransport.start(
-      runtime,
-    );
-    return connect(transport, version: runtime.version);
+    final ProcessCodexTransport strictTransport =
+        await ProcessCodexTransport.start(runtime);
+    try {
+      return await connect(strictTransport, version: runtime.version);
+    } on CodexException catch (error) {
+      if (!runtime.supportsStrictConfig || error.code != 'CodexExited') {
+        rethrow;
+      }
+      final ProcessCodexTransport compatibleTransport =
+          await ProcessCodexTransport.start(runtime, strictConfig: false);
+      return connect(compatibleTransport, version: runtime.version);
+    }
   }
 
   static Future<CodexAppServerClient> connect(

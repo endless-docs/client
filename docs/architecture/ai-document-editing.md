@@ -40,9 +40,12 @@ Markdown body и текущая команда.
   Success criteria;
 - `rfc`: Status, Summary, Motivation, Proposal, Alternatives, Risks, Rollout.
 
-App-server запускается со strict config, когда CLI поддерживает этот флаг.
-Актуальные версии без флага получают эквивалентный закрытый набор явных config
-overrides. В обоих случаях отключены web search, shell, MCP, plugins, apps и
+App-server сначала запускается со strict config, когда CLI поддерживает этот
+флаг. Если пользовательский config содержит допустимые для обычного Codex, но
+неизвестные strict parser поля и процесс завершается до initialize, клиент один
+раз повторяет запуск без strict validation. Версии без флага сразу используют
+этот compatibility path. В каждом варианте применяется одинаковый закрытый
+набор явных config overrides: отключены web search, shell, MCP, plugins, apps и
 multi-agent tools. Turn использует read-only sandbox, no command network и
 `approvalPolicy=never`.
 
