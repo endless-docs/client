@@ -45,6 +45,56 @@ void main() {
     expect(find.text('Сохранено локально'), findsOneWidget);
   });
 
+  testWidgets('switches between Markdown source and formatted preview', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Документ');
+    await tester.pumpAndSettle();
+
+    const String markdown = '''
+# Форматированный заголовок
+
+**Жирный текст**
+
+- Первый пункт
+
+![Схема](https://example.com/image.png)
+''';
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('document-editor-source')),
+      markdown,
+    );
+
+    await tester.tap(find.text('Просмотр'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('document-editor-preview')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('document-editor-source')),
+      findsNothing,
+    );
+    expect(find.text('Форматированный заголовок'), findsOneWidget);
+    expect(find.text('Жирный текст'), findsOneWidget);
+    expect(find.text('[Изображение: Схема]'), findsOneWidget);
+
+    await tester.tap(find.text('Исходник'));
+    await tester.pumpAndSettle();
+
+    final TextField source = tester.widget<TextField>(
+      find.byKey(const ValueKey<String>('document-editor-source')),
+    );
+    expect(source.controller!.text, markdown);
+  });
+
   testWidgets('flushes pending text before document navigation', (
     WidgetTester tester,
   ) async {

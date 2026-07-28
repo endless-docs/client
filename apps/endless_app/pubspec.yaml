@@ -12,6 +12,7 @@ dependencies:
   codex_app_server: any
   flutter:
     sdk: flutter
+  flutter_markdown_plus: ^1.0.12
   local_api: any
   local_api_client: any
   platform_runtime: any

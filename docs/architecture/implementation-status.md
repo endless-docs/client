@@ -36,6 +36,8 @@ Flutter UI / CLI
 Подтверждённые свойства:
 
 - Flutter UI не импортирует domain, application или Isar packages;
+- document editor поддерживает редактируемый Markdown source и selectable
+  formatted preview; preview не загружает внешние или локальные изображения;
 - optional Codex app-server adapter изолирован от persistence, работает в
   read-only/no-tools режиме и возвращает structured document actions;
 - ADR/Business Need/RFC сохраняются как document metadata; AI replacement

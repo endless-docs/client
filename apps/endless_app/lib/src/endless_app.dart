@@ -3,6 +3,7 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:codex_app_server/codex_app_server.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:local_api/local_api.dart';
 
 import 'app_controller.dart';
@@ -737,6 +738,8 @@ final class _EmptyDocumentView extends StatelessWidget {
 
 enum _SaveState { saved, pending, saving, failed, conflict }
 
+enum _EditorMode { source, preview }
+
 enum _WorkspaceAction { rename, archive, restore, delete }
 
 final class DocumentEditor extends StatefulWidget {
@@ -764,6 +767,7 @@ final class _DocumentEditorState extends State<DocumentEditor> {
   Future<void>? _activeSave;
   bool _dirty = false;
   _SaveState _state = _SaveState.saved;
+  _EditorMode _mode = _EditorMode.source;
 
   @override
   void initState() {
@@ -966,23 +970,30 @@ final class _DocumentEditorState extends State<DocumentEditor> {
               ),
             ],
           ),
-        const Divider(),
-        Expanded(
-          child: TextField(
-            controller: _content,
-            readOnly: widget.readOnly,
-            onChanged: widget.readOnly ? null : _changed,
-            expands: true,
-            maxLines: null,
-            minLines: null,
-            textAlignVertical: TextAlignVertical.top,
-            keyboardType: TextInputType.multiline,
-            decoration: const InputDecoration(
-              hintText: 'Начните писать…',
-              border: InputBorder.none,
-            ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<_EditorMode>(
+            showSelectedIcon: false,
+            segments: const <ButtonSegment<_EditorMode>>[
+              ButtonSegment<_EditorMode>(
+                value: _EditorMode.source,
+                icon: Icon(Icons.code),
+                label: Text('Исходник'),
+              ),
+              ButtonSegment<_EditorMode>(
+                value: _EditorMode.preview,
+                icon: Icon(Icons.menu_book_outlined),
+                label: Text('Просмотр'),
+              ),
+            ],
+            selected: <_EditorMode>{_mode},
+            onSelectionChanged: (Set<_EditorMode> selection) {
+              setState(() => _mode = selection.single);
+            },
           ),
         ),
+        const Divider(),
+        Expanded(child: _buildDocumentBody(context)),
         const Divider(height: 1),
         _AttachmentsPanel(
           controller: widget.controller,
@@ -991,7 +1002,45 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       ],
     ),
   );
+
+  Widget _buildDocumentBody(BuildContext context) {
+    if (_mode == _EditorMode.source) {
+      return TextField(
+        key: const ValueKey<String>('document-editor-source'),
+        controller: _content,
+        readOnly: widget.readOnly,
+        onChanged: widget.readOnly ? null : _changed,
+        expands: true,
+        maxLines: null,
+        minLines: null,
+        textAlignVertical: TextAlignVertical.top,
+        keyboardType: TextInputType.multiline,
+        decoration: const InputDecoration(
+          hintText: 'Начните писать…',
+          border: InputBorder.none,
+        ),
+      );
+    }
+    if (_content.text.trim().isEmpty) {
+      return const Center(
+        key: ValueKey<String>('document-editor-preview-empty'),
+        child: Text('Документ пока пуст'),
+      );
+    }
+    return Markdown(
+      key: const ValueKey<String>('document-editor-preview'),
+      data: _content.text,
+      selectable: true,
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      imageBuilder: _blockedMarkdownImage,
+    );
+  }
 }
+
+Widget _blockedMarkdownImage(Uri uri, String? title, String? alt) => Tooltip(
+  message: 'Изображения не загружаются в режиме просмотра',
+  child: Text('[Изображение: ${alt?.trim().isNotEmpty == true ? alt : uri}]'),
+);
 
 final class _AiPanel extends StatefulWidget {
   const _AiPanel({required this.controller, required this.readOnly});
