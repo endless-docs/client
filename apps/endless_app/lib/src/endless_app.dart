@@ -5,6 +5,7 @@ import 'package:codex_app_server/codex_app_server.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:local_api/local_api.dart';
 
 import 'app_controller.dart';
@@ -210,14 +211,15 @@ final class _BrandLogo extends StatelessWidget {
     return Semantics(
       image: true,
       label: 'Endless Docs',
-      child: Image.asset(
+      child: SvgPicture.asset(
         dark
-            ? 'assets/brand/endless-docs-logo-horizontal-dark.png'
-            : 'assets/brand/endless-docs-logo-horizontal-light.png',
+            ? 'assets/brand/endless-docs-logo-horizontal-dark.svg'
+            : 'assets/brand/endless-docs-logo-horizontal-light.svg',
+        key: ValueKey<String>(
+          dark ? 'brand-logo-dark-svg' : 'brand-logo-light-svg',
+        ),
         width: width,
         fit: BoxFit.contain,
-        filterQuality: FilterQuality.high,
-        excludeFromSemantics: true,
       ),
     );
   }

@@ -29,8 +29,8 @@ system_adrs:
 3. MCP server / CLI → Local API.
 4. `locald` → Isar/filesystem/keyring.
 5. Installer/update artifact → executable installation.
-6. Flutter UI → local Codex app-server → OpenAI service, только после explicit
-   disclosure пользователя.
+6. Flutter UI → local Codex app-server → OpenAI service, только по явной
+   команде пользователя в AI-панели.
 
 ## Threats and required controls
 

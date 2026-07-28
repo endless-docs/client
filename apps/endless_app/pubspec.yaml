@@ -13,6 +13,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_markdown_plus: ^1.0.12
+  flutter_svg: ^2.3.0
   local_api: any
   local_api_client: any
   platform_runtime: any
@@ -25,5 +26,5 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/brand/endless-docs-logo-horizontal-dark.png
-    - assets/brand/endless-docs-logo-horizontal-light.png
+    - assets/brand/endless-docs-logo-horizontal-dark.svg
+    - assets/brand/endless-docs-logo-horizontal-light.svg

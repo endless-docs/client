@@ -33,6 +33,10 @@ Codex configuration.
 in-memory transcript сбрасываются. Передаются только `document_type`, title,
 Markdown body и текущая команда.
 
+Пользователь запускает turn кнопкой «Отправить» или клавишей Enter;
+Shift+Enter добавляет перенос строки. Отдельный confirmation modal не
+показывается.
+
 Поддерживаются:
 
 - `adr`: Status, Context, Decision, Alternatives, Consequences;

@@ -8,6 +8,7 @@ import 'package:endless_app/src/endless_app.dart';
 import 'package:endless_app/src/endless_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:local_api/local_api.dart';
 import 'package:local_api_client/local_api_client.dart';
@@ -23,6 +24,25 @@ void main() {
     expect(dark.scaffoldBackgroundColor, EndlessBrand.darkBackground);
     expect(dark.colorScheme.primary, EndlessBrand.mint);
     expect(dark.colorScheme.surface, EndlessBrand.ink);
+  });
+
+  testWidgets('renders the dark app-bar brand logo as vector paths', (
+    WidgetTester tester,
+  ) async {
+    final AppController controller = AppController(
+      bootstrap: () async => _FakeLocalApi(),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    unawaited(controller.initialize());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SvgPicture), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('brand-logo-dark-svg')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('creates and autosaves a document entirely through Local API', (
