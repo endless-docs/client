@@ -7,6 +7,7 @@ import 'package:endless_app/src/app_controller.dart';
 import 'package:endless_app/src/endless_app.dart';
 import 'package:endless_app/src/endless_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:local_api/local_api.dart';
 import 'package:local_api_client/local_api_client.dart';
@@ -479,8 +480,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Codex готов'), findsOneWidget);
 
-    controller.acceptAiDisclosure();
-    await controller.runDocumentAi('Сформируй ADR');
+    expect(find.text('Отправить документ в Codex?'), findsNothing);
+    final Finder instruction = find.byKey(
+      const ValueKey<String>('ai-instruction'),
+    );
+    await tester.enterText(instruction, 'Первая строка');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+    final TextField instructionField = tester.widget<TextField>(instruction);
+    expect(instructionField.controller!.text, 'Первая строка\n');
+    expect(controller.selectedDocument!['title'], 'Черновик');
+
+    await tester.enterText(instruction, 'Сформируй ADR');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     expect(controller.selectedDocument!['title'], 'ADR: Решение');
@@ -508,7 +522,6 @@ void main() {
     await controller.initialize();
     await controller.createWorkspace('Личное');
     await controller.createDocument('Черновик', documentType: 'adr');
-    controller.acceptAiDisclosure();
 
     final Future<void> aiRun = controller.runDocumentAi('Обнови');
     await ai.started.future;

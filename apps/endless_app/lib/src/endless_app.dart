@@ -1884,48 +1884,93 @@ final class _AiPanel extends StatefulWidget {
 
 final class _AiPanelState extends State<_AiPanel> {
   final TextEditingController _instruction = TextEditingController();
+  late final FocusNode _instructionFocus;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _instructionFocus = FocusNode(onKeyEvent: _handleInstructionKey);
+    _instruction.addListener(_instructionChanged);
+  }
+
+  void _instructionChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   @override
   void dispose() {
+    _instruction.removeListener(_instructionChanged);
     _instruction.dispose();
+    _instructionFocus.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
-    if (!widget.controller.aiDisclosureAccepted) {
-      final bool? accepted = await showDialog<bool>(
-        context: context,
-        builder: (BuildContext context) => AlertDialog(
-          title: const Text('Отправить документ в Codex?'),
-          content: const Text(
-            'Заголовок, текст текущего документа и ваша команда будут '
-            'отправлены в OpenAI через локально установленный Codex. '
-            'Другие документы и вложения не отправляются.',
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Продолжить'),
-            ),
-          ],
-        ),
-      );
-      if (accepted != true || !mounted) {
-        return;
+  KeyEventResult _handleInstructionKey(FocusNode node, KeyEvent event) {
+    final bool enter =
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter;
+    if (event is KeyDownEvent && enter && _canEditInstruction) {
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        _insertInstructionNewline();
+      } else if (_instruction.text.trim().isNotEmpty) {
+        unawaited(_send());
       }
-      widget.controller.acceptAiDisclosure();
+      return KeyEventResult.handled;
     }
-    final String instruction = _instruction.text;
-    await _runUiActionAsync(
-      context,
-      () => widget.controller.runDocumentAi(instruction),
+    return KeyEventResult.ignored;
+  }
+
+  void _insertInstructionNewline() {
+    final TextEditingValue value = _instruction.value;
+    final TextSelection selection =
+        value.selection.isValid &&
+            value.selection.start <= value.text.length &&
+            value.selection.end <= value.text.length
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+    final String text = value.text.replaceRange(
+      selection.start,
+      selection.end,
+      '\n',
     );
-    if (mounted && widget.controller.aiError == null) {
-      _instruction.clear();
+    _instruction.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: selection.start + 1),
+    );
+  }
+
+  bool get _canEditInstruction {
+    final AppController controller = widget.controller;
+    final JsonMap? document = controller.selectedDocument;
+    return controller.aiAvailability == DocumentAiAvailability.ready &&
+        !widget.readOnly &&
+        !_sending &&
+        !controller.aiRunning &&
+        document != null &&
+        document['document_type'] != 'plain';
+  }
+
+  Future<void> _send() async {
+    final String instruction = _instruction.text.trim();
+    if (instruction.isEmpty || _sending || widget.controller.aiRunning) {
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      await _runUiActionAsync(
+        context,
+        () => widget.controller.runDocumentAi(instruction),
+      );
+      if (mounted && widget.controller.aiError == null) {
+        _instruction.clear();
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _sending = false);
+      }
     }
   }
 
@@ -1934,13 +1979,8 @@ final class _AiPanelState extends State<_AiPanel> {
     final AppController controller = widget.controller;
     final JsonMap document = controller.selectedDocument!;
     final String documentType = document['document_type'] as String? ?? 'plain';
-    final bool ready =
-        controller.aiAvailability == DocumentAiAvailability.ready;
-    final bool canSend =
-        ready &&
-        !widget.readOnly &&
-        !controller.aiRunning &&
-        documentType != 'plain';
+    final bool canEdit = _canEditInstruction;
+    final bool canSend = canEdit && _instruction.text.trim().isNotEmpty;
     return ColoredBox(
       color: Theme.of(context).colorScheme.surfaceContainerLowest,
       child: Padding(
@@ -2054,14 +2094,18 @@ final class _AiPanelState extends State<_AiPanel> {
               const SizedBox(height: 8),
             ],
             TextField(
+              key: const ValueKey<String>('ai-instruction'),
               controller: _instruction,
+              focusNode: _instructionFocus,
               minLines: 2,
               maxLines: 5,
-              enabled: canSend,
+              enabled: canEdit,
+              textInputAction: TextInputAction.newline,
               decoration: InputDecoration(
                 hintText: documentType == 'plain'
                     ? 'Сначала выберите тип документа'
                     : 'Что сделать с документом?',
+                helperText: 'Enter — отправить, Shift+Enter — новая строка',
                 border: const OutlineInputBorder(),
               ),
               onSubmitted: canSend ? (_) => unawaited(_send()) : null,

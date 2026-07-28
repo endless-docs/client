@@ -79,7 +79,6 @@ final class AppController extends ChangeNotifier {
   bool aiPanelOpen = false;
   bool aiChecking = false;
   bool aiRunning = false;
-  bool aiDisclosureAccepted = false;
   _AiUndoSnapshot? _aiUndo;
   int _searchRequest = 0;
 
@@ -555,11 +554,6 @@ final class AppController extends ChangeNotifier {
     }
   }
 
-  void acceptAiDisclosure() {
-    aiDisclosureAccepted = true;
-    notifyListeners();
-  }
-
   Future<void> checkAiAvailability() async {
     final DocumentAi? ai = _documentAi;
     if (ai == null) {
@@ -586,9 +580,6 @@ final class AppController extends ChangeNotifier {
       aiAvailability = DocumentAiAvailability.missing;
       notifyListeners();
       return;
-    }
-    if (!aiDisclosureAccepted) {
-      throw StateError('AI disclosure must be accepted first.');
     }
     if (!isSelectedWorkspaceWritable) {
       throw StateError('Archived workspace is read-only.');
