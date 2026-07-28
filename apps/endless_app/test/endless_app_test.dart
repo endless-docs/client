@@ -483,6 +483,8 @@ void main() {
   testWidgets('applies and undoes an AI document replacement', (
     WidgetTester tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final _FakeLocalApi api = _FakeLocalApi();
     final _FakeDocumentAi ai = _FakeDocumentAi();
     final AppController controller = AppController(
@@ -523,6 +525,17 @@ void main() {
       '## Context\nКонтекст решения.',
     );
     expect(controller.canUndoAiEdit, isTrue);
+    expect(
+      find.text('Enter — отправить, Shift+Enter — новая строка'),
+      findsNothing,
+    );
+    final Offset undoCenter = tester.getCenter(
+      find.byKey(const ValueKey<String>('ai-undo')),
+    );
+    final Offset sendCenter = tester.getCenter(
+      find.byKey(const ValueKey<String>('ai-send')),
+    );
+    expect((undoCenter.dy - sendCenter.dy).abs(), lessThan(1));
 
     await controller.undoAiEdit();
     await tester.pumpAndSettle();

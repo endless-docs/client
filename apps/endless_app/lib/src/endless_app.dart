@@ -2107,35 +2107,43 @@ final class _AiPanelState extends State<_AiPanel> {
                 hintText: documentType == 'plain'
                     ? 'Сначала выберите тип документа'
                     : 'Что сделать с документом?',
-                helperText: 'Enter — отправить, Shift+Enter — новая строка',
                 border: const OutlineInputBorder(),
               ),
               onSubmitted: canSend ? (_) => unawaited(_send()) : null,
             ),
             const SizedBox(height: 8),
-            if (controller.canUndoAiEdit)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: controller.aiRunning
-                      ? null
-                      : () => _runUiAction(context, controller.undoAiEdit),
-                  icon: const Icon(Icons.undo),
-                  label: const Text('Отменить AI-правку'),
-                ),
-              ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: controller.aiRunning
-                  ? OutlinedButton(
-                      onPressed: controller.cancelDocumentAi,
-                      child: const Text('Остановить'),
-                    )
-                  : FilledButton.icon(
-                      onPressed: canSend ? _send : null,
-                      icon: const Icon(Icons.send),
-                      label: const Text('Отправить'),
+            Row(
+              key: const ValueKey<String>('ai-actions'),
+              children: <Widget>[
+                if (controller.canUndoAiEdit)
+                  Tooltip(
+                    message: 'Отменить AI-правку',
+                    child: TextButton.icon(
+                      key: const ValueKey<String>('ai-undo'),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      onPressed: controller.aiRunning
+                          ? null
+                          : () => _runUiAction(context, controller.undoAiEdit),
+                      icon: const Icon(Icons.undo),
+                      label: const Text('Отменить'),
                     ),
+                  ),
+                const Spacer(),
+                if (controller.aiRunning)
+                  OutlinedButton(
+                    onPressed: controller.cancelDocumentAi,
+                    child: const Text('Остановить'),
+                  )
+                else
+                  FilledButton.icon(
+                    key: const ValueKey<String>('ai-send'),
+                    onPressed: canSend ? _send : null,
+                    icon: const Icon(Icons.send),
+                    label: const Text('Отправить'),
+                  ),
+              ],
             ),
           ],
         ),
