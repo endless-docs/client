@@ -39,6 +39,7 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     'profile_id': profileId,
     'capabilities': <String>[
       'documents',
+      'document_versions',
       'offline',
       'attachments',
       'backup_export',
@@ -140,6 +141,15 @@ final class HttpLocalApiClient implements EndlessLocalApi {
     'GetDocument',
     payload: <String, Object?>{'document_id': documentId},
   );
+
+  @override
+  Future<List<JsonMap>> listDocumentVersions(String documentId) async {
+    final JsonMap data = await _query(
+      'ListDocumentVersions',
+      payload: <String, Object?>{'document_id': documentId},
+    );
+    return requireMapList(data, 'versions');
+  }
 
   @override
   Future<JsonMap> createDocument({

@@ -69,6 +69,8 @@ abstract interface class EndlessLocalApi {
 
   Future<JsonMap> getDocument(String documentId);
 
+  Future<List<JsonMap>> listDocumentVersions(String documentId);
+
   Future<JsonMap> createDocument({
     required String commandId,
     required String workspaceId,

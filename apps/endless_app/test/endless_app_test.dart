@@ -108,6 +108,80 @@ void main() {
     expect(source.controller!.text, markdown);
   });
 
+  testWidgets('formats Markdown and supports toolbar undo and redo', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Документ');
+    await tester.pumpAndSettle();
+
+    final Finder sourceFinder = find.byKey(
+      const ValueKey<String>('document-editor-source'),
+    );
+    await tester.enterText(sourceFinder, 'важный текст');
+    TextField source = tester.widget<TextField>(sourceFinder);
+    source.controller!.selection = const TextSelection(
+      baseOffset: 0,
+      extentOffset: 12,
+    );
+
+    await tester.tap(find.byTooltip('Жирный'));
+    await tester.pump();
+    expect(source.controller!.text, '**важный текст**');
+
+    await tester.tap(find.byKey(const ValueKey<String>('editor-undo')));
+    await tester.pump();
+    expect(source.controller!.text, 'важный текст');
+
+    await tester.tap(find.byKey(const ValueKey<String>('editor-redo')));
+    await tester.pump();
+    expect(source.controller!.text, '**важный текст**');
+  });
+
+  testWidgets('restores an older document version as a new revision', (
+    WidgetTester tester,
+  ) async {
+    final _FakeLocalApi api = _FakeLocalApi();
+    final AppController controller = AppController(bootstrap: () async => api);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Документ');
+    await tester.pumpAndSettle();
+
+    final Finder sourceFinder = find.byKey(
+      const ValueKey<String>('document-editor-source'),
+    );
+    await tester.enterText(sourceFinder, 'Первая версия');
+    await tester.pump(const Duration(milliseconds: 750));
+    await tester.pumpAndSettle();
+    await tester.enterText(sourceFinder, 'Вторая версия');
+    await tester.pump(const Duration(milliseconds: 750));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('История версий'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('История версий'), findsOneWidget);
+    expect(find.text('Версия 3'), findsOneWidget);
+    expect(find.text('Версия 2'), findsOneWidget);
+    expect(find.text('Первая версия'), findsOneWidget);
+
+    await tester.tap(find.text('Восстановить').first);
+    await tester.pumpAndSettle();
+
+    final TextField source = tester.widget<TextField>(sourceFinder);
+    expect(source.controller!.text, 'Первая версия');
+    expect(api.savedTextByDocument['document-1'], 'Первая версия');
+    expect(requireInt(await api.getDocument('document-1'), 'revision'), 4);
+  });
+
   testWidgets('flushes pending text before document navigation', (
     WidgetTester tester,
   ) async {
@@ -500,6 +574,8 @@ final class _BlockingDocumentAi extends _FakeDocumentAi {
 final class _FakeLocalApi implements EndlessLocalApi {
   final List<JsonMap> _workspaces = <JsonMap>[];
   final List<JsonMap> _documents = <JsonMap>[];
+  final Map<String, List<JsonMap>> _documentVersions =
+      <String, List<JsonMap>>{};
   final List<JsonMap> _attachments = <JsonMap>[];
   final Map<String, List<int>> _attachmentBytes = <String, List<int>>{};
   final Map<String, JsonMap> _stagedAttachments = <String, JsonMap>{};
@@ -631,6 +707,16 @@ final class _FakeLocalApi implements EndlessLocalApi {
       'updated_at': '2026-01-01T00:00:00Z',
     };
     _documents.add(document);
+    _documentVersions[id] = <JsonMap>[
+      <String, Object?>{
+        'revision': 1,
+        'title': title,
+        'content': '',
+        'document_type': documentType,
+        'created_at': '2026-01-01T00:00:00Z',
+        'is_current': true,
+      },
+    ];
     return document;
   }
 
@@ -673,6 +759,20 @@ final class _FakeLocalApi implements EndlessLocalApi {
       'updated_at': '2026-01-01T00:00:01Z',
     };
     _documents[index] = saved;
+    for (final JsonMap version
+        in _documentVersions[documentId] ?? const <JsonMap>[]) {
+      version['is_current'] = false;
+    }
+    _documentVersions
+        .putIfAbsent(documentId, () => <JsonMap>[])
+        .add(<String, Object?>{
+          'revision': saved['revision'],
+          'title': title,
+          'content': savedTextByDocument[documentId],
+          'document_type': saved['document_type'],
+          'created_at': saved['updated_at'],
+          'is_current': true,
+        });
     return saved;
   }
 
@@ -713,6 +813,12 @@ final class _FakeLocalApi implements EndlessLocalApi {
   @override
   Future<JsonMap> getDocument(String documentId) async =>
       _documents[_indexOf(documentId)];
+
+  @override
+  Future<List<JsonMap>> listDocumentVersions(String documentId) async =>
+      (_documentVersions[documentId] ?? const <JsonMap>[]).reversed
+          .map(Map<String, Object?>.of)
+          .toList();
 
   @override
   Future<JsonMap> handshake({

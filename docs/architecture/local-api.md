@@ -85,6 +85,11 @@ Local API 1.1 добавляет optional `document_type` в `CreateDocument` и
 `document_type`, поэтому AI может атомарно изменить тип и content одной
 revision-checked командой.
 
+Опциональная capability `document_versions` добавляет query
+`ListDocumentVersions`. Она проецирует сохранённые снимки из operation log;
+восстановление выполняется обычной revision-checked `ApplyBlockChanges` и само
+создаёт новую версию.
+
 ### Search
 
 `SearchDocuments`, `GetSearchStatus`, `RebuildSearchIndex`.

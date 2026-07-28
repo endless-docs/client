@@ -69,6 +69,13 @@ void main() {
         expectedRevision: requireInt(document, 'revision'),
       );
       expect(saved['document_type'], 'rfc');
+      final List<JsonMap> versions = await client.listDocumentVersions(
+        requireString(document, 'document_id'),
+      );
+      expect(versions, hasLength(2));
+      expect(versions.first['content'], 'Available without cloud');
+      expect(versions.first['is_current'], isTrue);
+      expect(versions.last['document_type'], 'adr');
       final JsonMap child = await client.createDocument(
         commandId: 'child-command',
         workspaceId: requireString(workspace, 'workspace_id'),

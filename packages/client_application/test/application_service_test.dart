@@ -118,6 +118,62 @@ void main() {
     },
   );
 
+  test('document versions project durable full-text history', () async {
+    final CommandReceipt workspace = await service.createWorkspace(
+      commandId: 'versions-workspace',
+      name: 'Writing',
+    );
+    final CommandReceipt created = await service.createDocument(
+      commandId: 'versions-document',
+      workspaceId: workspace.result['workspace_id']! as String,
+      title: 'Draft',
+      documentType: DocumentType.adr,
+    );
+    final String documentId = created.result['document_id']! as String;
+    final CommandReceipt second = await service.saveDocument(
+      commandId: 'versions-save-2',
+      documentId: documentId,
+      title: 'Decision',
+      blocks: const <BlockDraft>[
+        BlockDraft(
+          type: BlockType.paragraph,
+          payload: <String, Object?>{'text': '# First'},
+        ),
+      ],
+      expectedRevision: 1,
+    );
+    await service.saveDocument(
+      commandId: 'versions-save-3',
+      documentId: documentId,
+      title: 'Decision final',
+      blocks: const <BlockDraft>[
+        BlockDraft(
+          type: BlockType.paragraph,
+          payload: <String, Object?>{'text': '# Final'},
+        ),
+      ],
+      documentType: DocumentType.rfc,
+      expectedRevision: second.result['revision']! as int,
+    );
+
+    final List<DocumentVersion> versions = await service.listDocumentVersions(
+      documentId,
+    );
+
+    expect(versions.map((DocumentVersion version) => version.revision), <int>[
+      3,
+      2,
+      1,
+    ]);
+    expect(versions.first.content, '# Final');
+    expect(versions.first.documentType, DocumentType.rfc);
+    expect(versions.first.isCurrent, isTrue);
+    expect(versions[1].content, '# First');
+    expect(versions[1].documentType, DocumentType.adr);
+    expect(versions.last.title, 'Draft');
+    expect(versions.last.content, isEmpty);
+  });
+
   test('moving a document under its descendant is rejected', () async {
     final CommandReceipt workspace = await service.createWorkspace(
       commandId: 'workspace',

@@ -3,6 +3,7 @@ import 'dart:ui' show AppExitResponse;
 
 import 'package:codex_app_server/codex_app_server.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:local_api/local_api.dart';
 
@@ -939,10 +940,17 @@ final class DocumentEditor extends StatefulWidget {
 final class _DocumentEditorState extends State<DocumentEditor> {
   late TextEditingController _title;
   late TextEditingController _content;
+  final FocusNode _contentFocus = FocusNode();
+  final List<TextEditingValue> _undoStack = <TextEditingValue>[];
+  final List<TextEditingValue> _redoStack = <TextEditingValue>[];
+  late TextEditingValue _lastContentValue;
   late int _revision;
   String? _blockId;
   Timer? _autosave;
+  Timer? _historyGroupTimer;
   Future<void>? _activeSave;
+  bool _applyingContentValue = false;
+  bool _historyGroupOpen = false;
   bool _dirty = false;
   _SaveState _state = _SaveState.saved;
   _EditorMode _mode = _EditorMode.source;
@@ -951,6 +959,7 @@ final class _DocumentEditorState extends State<DocumentEditor> {
   void initState() {
     super.initState();
     _readDocument(widget.document);
+    _content.addListener(_contentValueChanged);
     widget.controller.attachEditor(this, _flushBeforeNavigation);
   }
 
@@ -964,9 +973,11 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       _revision = incomingRevision;
       _blockId = blocks.isEmpty ? null : blocks.first['block_id'] as String?;
       _title.text = requireString(widget.document, 'title');
-      _content.text = blocks.isEmpty
-          ? ''
-          : (requireMap(blocks.first, 'payload')['text'] as String?) ?? '';
+      _replaceContentFromExternal(
+        blocks.isEmpty
+            ? ''
+            : (requireMap(blocks.first, 'payload')['text'] as String?) ?? '',
+      );
       _dirty = false;
       _state = _SaveState.saved;
     }
@@ -981,6 +992,227 @@ final class _DocumentEditorState extends State<DocumentEditor> {
         : (requireMap(blocks.first, 'payload')['text'] as String?) ?? '';
     _title = TextEditingController(text: requireString(document, 'title'));
     _content = TextEditingController(text: text);
+    _lastContentValue = _content.value;
+  }
+
+  void _contentValueChanged() {
+    final TextEditingValue value = _content.value;
+    if (_applyingContentValue) {
+      _lastContentValue = value;
+      return;
+    }
+    if (value.text != _lastContentValue.text) {
+      if (!_historyGroupOpen) {
+        _undoStack.add(_lastContentValue);
+        if (_undoStack.length > 100) {
+          _undoStack.removeAt(0);
+        }
+      }
+      _redoStack.clear();
+      _historyGroupOpen = true;
+      _historyGroupTimer?.cancel();
+      _historyGroupTimer = Timer(
+        const Duration(milliseconds: 650),
+        _finishHistoryGroup,
+      );
+    }
+    _lastContentValue = value;
+  }
+
+  void _finishHistoryGroup() {
+    _historyGroupTimer?.cancel();
+    _historyGroupTimer = null;
+    _historyGroupOpen = false;
+  }
+
+  void _replaceContentFromExternal(String text) {
+    _finishHistoryGroup();
+    _applyingContentValue = true;
+    _content.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    _applyingContentValue = false;
+    _lastContentValue = _content.value;
+    _undoStack.clear();
+    _redoStack.clear();
+  }
+
+  void _undo() {
+    if (widget.readOnly || _undoStack.isEmpty) {
+      return;
+    }
+    _finishHistoryGroup();
+    final TextEditingValue current = _content.value;
+    final TextEditingValue previous = _undoStack.removeLast();
+    _redoStack.add(current);
+    _applyHistoryValue(previous);
+  }
+
+  void _redo() {
+    if (widget.readOnly || _redoStack.isEmpty) {
+      return;
+    }
+    _finishHistoryGroup();
+    final TextEditingValue current = _content.value;
+    final TextEditingValue next = _redoStack.removeLast();
+    _undoStack.add(current);
+    _applyHistoryValue(next);
+  }
+
+  void _applyHistoryValue(TextEditingValue value) {
+    _applyingContentValue = true;
+    _content.value = value;
+    _applyingContentValue = false;
+    _lastContentValue = value;
+    _changed(value.text);
+    _contentFocus.requestFocus();
+  }
+
+  TextSelection get _safeSelection {
+    final TextSelection selection = _content.selection;
+    if (!selection.isValid ||
+        selection.start > _content.text.length ||
+        selection.end > _content.text.length) {
+      return TextSelection.collapsed(offset: _content.text.length);
+    }
+    return selection;
+  }
+
+  void _wrapSelection(
+    String prefix,
+    String suffix, {
+    required String placeholder,
+  }) {
+    if (widget.readOnly) {
+      return;
+    }
+    _finishHistoryGroup();
+    final String text = _content.text;
+    final TextSelection selection = _safeSelection;
+    final int start = selection.start;
+    final int end = selection.end;
+    final String selected = text.substring(start, end);
+    final String body = selected.isEmpty ? placeholder : selected;
+    final String replacement = '$prefix$body$suffix';
+    final int selectionStart = start + prefix.length;
+    final TextSelection nextSelection = selected.isEmpty
+        ? TextSelection(
+            baseOffset: selectionStart,
+            extentOffset: selectionStart + body.length,
+          )
+        : TextSelection.collapsed(offset: start + replacement.length);
+    _applyUserEdit(
+      TextEditingValue(
+        text: text.replaceRange(start, end, replacement),
+        selection: nextSelection,
+      ),
+    );
+  }
+
+  void _insertText(String insertion) {
+    if (widget.readOnly) {
+      return;
+    }
+    _finishHistoryGroup();
+    final String text = _content.text;
+    final TextSelection selection = _safeSelection;
+    _applyUserEdit(
+      TextEditingValue(
+        text: text.replaceRange(selection.start, selection.end, insertion),
+        selection: TextSelection.collapsed(
+          offset: selection.start + insertion.length,
+        ),
+      ),
+    );
+  }
+
+  void _transformSelectedLines(String Function(String line, int index) change) {
+    if (widget.readOnly) {
+      return;
+    }
+    _finishHistoryGroup();
+    final String text = _content.text;
+    final TextSelection selection = _safeSelection;
+    final int lineStart = selection.start == 0
+        ? 0
+        : text.lastIndexOf('\n', selection.start - 1) + 1;
+    final int nextBreak = text.indexOf('\n', selection.end);
+    final int lineEnd = nextBreak < 0 ? text.length : nextBreak;
+    final String replacement = text
+        .substring(lineStart, lineEnd)
+        .split('\n')
+        .indexed
+        .map(((int, String) entry) => change(entry.$2, entry.$1))
+        .join('\n');
+    _applyUserEdit(
+      TextEditingValue(
+        text: text.replaceRange(lineStart, lineEnd, replacement),
+        selection: TextSelection(
+          baseOffset: lineStart,
+          extentOffset: lineStart + replacement.length,
+        ),
+      ),
+    );
+  }
+
+  void _setHeading(int level) {
+    _transformSelectedLines((String line, int _) {
+      final String body = line.replaceFirst(RegExp(r'^#{1,6}\s+'), '');
+      final String marker = List<String>.filled(level, '#').join();
+      return level == 0 ? body : '$marker $body';
+    });
+  }
+
+  void _toggleLinePrefix(String prefix) {
+    final TextSelection selection = _safeSelection;
+    final String text = _content.text;
+    final int lineStart = selection.start == 0
+        ? 0
+        : text.lastIndexOf('\n', selection.start - 1) + 1;
+    final int nextBreak = text.indexOf('\n', selection.end);
+    final int lineEnd = nextBreak < 0 ? text.length : nextBreak;
+    final List<String> lines = text.substring(lineStart, lineEnd).split('\n');
+    final bool remove = lines
+        .where((String line) => line.isNotEmpty)
+        .every((String line) => line.startsWith(prefix));
+    _transformSelectedLines(
+      (String line, int _) => line.isEmpty
+          ? line
+          : remove
+          ? line.substring(prefix.length)
+          : '$prefix$line',
+    );
+  }
+
+  void _toggleNumberedList() {
+    final RegExp marker = RegExp(r'^\d+\.\s+');
+    final TextSelection selection = _safeSelection;
+    final String text = _content.text;
+    final int lineStart = selection.start == 0
+        ? 0
+        : text.lastIndexOf('\n', selection.start - 1) + 1;
+    final int nextBreak = text.indexOf('\n', selection.end);
+    final int lineEnd = nextBreak < 0 ? text.length : nextBreak;
+    final List<String> lines = text.substring(lineStart, lineEnd).split('\n');
+    final bool remove = lines
+        .where((String line) => line.isNotEmpty)
+        .every(marker.hasMatch);
+    _transformSelectedLines((String line, int index) {
+      if (line.isEmpty) {
+        return line;
+      }
+      return remove
+          ? line.replaceFirst(marker, '')
+          : '${index + 1}. ${line.replaceFirst(marker, '')}';
+    });
+  }
+
+  void _applyUserEdit(TextEditingValue value) {
+    _content.value = value;
+    _finishHistoryGroup();
+    _changed(value.text);
+    _contentFocus.requestFocus();
   }
 
   void _changed(String _) {
@@ -1079,9 +1311,12 @@ final class _DocumentEditorState extends State<DocumentEditor> {
   @override
   void dispose() {
     _autosave?.cancel();
+    _historyGroupTimer?.cancel();
     widget.controller.detachEditor(this);
+    _content.removeListener(_contentValueChanged);
     _title.dispose();
     _content.dispose();
+    _contentFocus.dispose();
     super.dispose();
   }
 
@@ -1153,28 +1388,45 @@ final class _DocumentEditorState extends State<DocumentEditor> {
               ),
             ],
           ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: SegmentedButton<_EditorMode>(
-            showSelectedIcon: false,
-            segments: const <ButtonSegment<_EditorMode>>[
-              ButtonSegment<_EditorMode>(
-                value: _EditorMode.source,
-                icon: Icon(Icons.code),
-                label: Text('Исходник'),
+        Row(
+          children: <Widget>[
+            SegmentedButton<_EditorMode>(
+              showSelectedIcon: false,
+              segments: const <ButtonSegment<_EditorMode>>[
+                ButtonSegment<_EditorMode>(
+                  value: _EditorMode.source,
+                  icon: Icon(Icons.code),
+                  label: Text('Исходник'),
+                ),
+                ButtonSegment<_EditorMode>(
+                  value: _EditorMode.preview,
+                  icon: Icon(Icons.menu_book_outlined),
+                  label: Text('Просмотр'),
+                ),
+              ],
+              selected: <_EditorMode>{_mode},
+              onSelectionChanged: (Set<_EditorMode> selection) {
+                setState(() => _mode = selection.single);
+              },
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: 'История версий',
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (BuildContext context) => _DocumentVersionsDialog(
+                  controller: widget.controller,
+                  readOnly: widget.readOnly,
+                ),
               ),
-              ButtonSegment<_EditorMode>(
-                value: _EditorMode.preview,
-                icon: Icon(Icons.menu_book_outlined),
-                label: Text('Просмотр'),
-              ),
-            ],
-            selected: <_EditorMode>{_mode},
-            onSelectionChanged: (Set<_EditorMode> selection) {
-              setState(() => _mode = selection.single);
-            },
-          ),
+              icon: const Icon(Icons.history),
+            ),
+          ],
         ),
+        if (_mode == _EditorMode.source) ...<Widget>[
+          const SizedBox(height: 8),
+          _buildFormattingToolbar(context),
+        ],
         const Divider(),
         Expanded(child: _buildDocumentBody(context)),
         const Divider(height: 1),
@@ -1188,22 +1440,34 @@ final class _DocumentEditorState extends State<DocumentEditor> {
 
   Widget _buildDocumentBody(BuildContext context) {
     if (_mode == _EditorMode.source) {
-      return TextField(
-        key: const ValueKey<String>('document-editor-source'),
-        controller: _content,
-        readOnly: widget.readOnly,
-        onChanged: widget.readOnly ? null : _changed,
-        expands: true,
-        maxLines: null,
-        minLines: null,
-        textAlignVertical: TextAlignVertical.top,
-        keyboardType: TextInputType.multiline,
-        style: Theme.of(context).textTheme.bodyLarge,
-        decoration: const InputDecoration(
-          hintText: 'Начните писать…',
-          border: InputBorder.none,
-          filled: false,
-          contentPadding: EdgeInsets.symmetric(vertical: 20),
+      return CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
+          const SingleActivator(
+            LogicalKeyboardKey.keyZ,
+            control: true,
+            shift: true,
+          ): _redo,
+          const SingleActivator(LogicalKeyboardKey.keyY, control: true): _redo,
+        },
+        child: TextField(
+          key: const ValueKey<String>('document-editor-source'),
+          controller: _content,
+          focusNode: _contentFocus,
+          readOnly: widget.readOnly,
+          onChanged: widget.readOnly ? null : _changed,
+          expands: true,
+          maxLines: null,
+          minLines: null,
+          textAlignVertical: TextAlignVertical.top,
+          keyboardType: TextInputType.multiline,
+          style: Theme.of(context).textTheme.bodyLarge,
+          decoration: const InputDecoration(
+            hintText: 'Начните писать…',
+            border: InputBorder.none,
+            filled: false,
+            contentPadding: EdgeInsets.symmetric(vertical: 20),
+          ),
         ),
       );
     }
@@ -1221,6 +1485,386 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       imageBuilder: _blockedMarkdownImage,
     );
   }
+
+  Widget _buildFormattingToolbar(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: SizedBox(
+        height: 44,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            children: <Widget>[
+              IconButton(
+                key: const ValueKey<String>('editor-undo'),
+                tooltip: 'Отменить (Ctrl+Z)',
+                onPressed: !widget.readOnly && _undoStack.isNotEmpty
+                    ? _undo
+                    : null,
+                icon: const Icon(Icons.undo, size: 20),
+              ),
+              IconButton(
+                key: const ValueKey<String>('editor-redo'),
+                tooltip: 'Повторить (Ctrl+Y)',
+                onPressed: !widget.readOnly && _redoStack.isNotEmpty
+                    ? _redo
+                    : null,
+                icon: const Icon(Icons.redo, size: 20),
+              ),
+              const VerticalDivider(indent: 8, endIndent: 8),
+              PopupMenuButton<int>(
+                key: const ValueKey<String>('editor-heading'),
+                tooltip: 'Стиль текста',
+                enabled: !widget.readOnly,
+                onSelected: _setHeading,
+                itemBuilder: (BuildContext context) =>
+                    const <PopupMenuEntry<int>>[
+                      PopupMenuItem<int>(
+                        value: 0,
+                        child: Text('Обычный текст'),
+                      ),
+                      PopupMenuItem<int>(value: 1, child: Text('Заголовок 1')),
+                      PopupMenuItem<int>(value: 2, child: Text('Заголовок 2')),
+                      PopupMenuItem<int>(value: 3, child: Text('Заголовок 3')),
+                    ],
+                icon: const Icon(Icons.title, size: 20),
+              ),
+              _formatButton(
+                tooltip: 'Жирный',
+                icon: Icons.format_bold,
+                onPressed: () =>
+                    _wrapSelection('**', '**', placeholder: 'жирный текст'),
+              ),
+              _formatButton(
+                tooltip: 'Курсив',
+                icon: Icons.format_italic,
+                onPressed: () =>
+                    _wrapSelection('_', '_', placeholder: 'курсив'),
+              ),
+              _formatButton(
+                tooltip: 'Зачёркнутый',
+                icon: Icons.strikethrough_s,
+                onPressed: () =>
+                    _wrapSelection('~~', '~~', placeholder: 'текст'),
+              ),
+              _formatButton(
+                tooltip: 'Строчный код',
+                icon: Icons.code,
+                onPressed: () => _wrapSelection('`', '`', placeholder: 'код'),
+              ),
+              _formatButton(
+                tooltip: 'Ссылка',
+                icon: Icons.link,
+                onPressed: () => _wrapSelection(
+                  '[',
+                  '](https://)',
+                  placeholder: 'текст ссылки',
+                ),
+              ),
+              const VerticalDivider(indent: 8, endIndent: 8),
+              _formatButton(
+                tooltip: 'Маркированный список',
+                icon: Icons.format_list_bulleted,
+                onPressed: () => _toggleLinePrefix('- '),
+              ),
+              _formatButton(
+                tooltip: 'Нумерованный список',
+                icon: Icons.format_list_numbered,
+                onPressed: _toggleNumberedList,
+              ),
+              _formatButton(
+                tooltip: 'Список задач',
+                icon: Icons.checklist,
+                onPressed: () => _toggleLinePrefix('- [ ] '),
+              ),
+              _formatButton(
+                tooltip: 'Цитата',
+                icon: Icons.format_quote,
+                onPressed: () => _toggleLinePrefix('> '),
+              ),
+              _formatButton(
+                tooltip: 'Блок кода',
+                icon: Icons.data_object,
+                onPressed: () =>
+                    _wrapSelection('```\n', '\n```', placeholder: 'код'),
+              ),
+              _formatButton(
+                tooltip: 'Разделитель',
+                icon: Icons.horizontal_rule,
+                onPressed: () => _insertText('\n\n---\n\n'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _formatButton({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) => IconButton(
+    tooltip: tooltip,
+    onPressed: widget.readOnly ? null : onPressed,
+    icon: Icon(icon, size: 20),
+  );
+}
+
+final class _DocumentVersionsDialog extends StatefulWidget {
+  const _DocumentVersionsDialog({
+    required this.controller,
+    required this.readOnly,
+  });
+
+  final AppController controller;
+  final bool readOnly;
+
+  @override
+  State<_DocumentVersionsDialog> createState() =>
+      _DocumentVersionsDialogState();
+}
+
+final class _DocumentVersionsDialogState
+    extends State<_DocumentVersionsDialog> {
+  late Future<List<JsonMap>> _versions;
+  int? _restoringRevision;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _versions = widget.controller.listSelectedDocumentVersions();
+  }
+
+  void _reload() {
+    setState(() {
+      _error = null;
+      _versions = widget.controller.listSelectedDocumentVersions();
+    });
+  }
+
+  Future<void> _restore(JsonMap version) async {
+    final int revision = requireInt(version, 'revision');
+    setState(() {
+      _restoringRevision = revision;
+      _error = null;
+    });
+    try {
+      await widget.controller.restoreDocumentVersion(version);
+      if (!mounted) {
+        return;
+      }
+      final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Версия $revision восстановлена')),
+      );
+    } on LocalApiException catch (error) {
+      if (mounted) {
+        setState(() => _error = error.message);
+      }
+    } on Object {
+      if (mounted) {
+        setState(() => _error = 'Не удалось восстановить версию.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _restoringRevision = null);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Row(
+      children: <Widget>[
+        Icon(Icons.history),
+        SizedBox(width: 10),
+        Text('История версий'),
+      ],
+    ),
+    content: SizedBox(
+      width: 620,
+      height: 520,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            'Каждое восстановление создаёт новую версию — предыдущий текст '
+            'не теряется.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          if (_error != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Expanded(
+            child: FutureBuilder<List<JsonMap>>(
+              future: _versions,
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<List<JsonMap>> snapshot,
+                  ) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            const Text('Не удалось загрузить историю версий.'),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: _reload,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Повторить'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                    final List<JsonMap> versions =
+                        snapshot.data ?? const <JsonMap>[];
+                    if (versions.isEmpty) {
+                      return const Center(
+                        child: Text('Сохранённых версий пока нет.'),
+                      );
+                    }
+                    return ListView.separated(
+                      itemCount: versions.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (BuildContext context, int index) =>
+                          _DocumentVersionCard(
+                            version: versions[index],
+                            readOnly: widget.readOnly,
+                            restoring:
+                                _restoringRevision ==
+                                requireInt(versions[index], 'revision'),
+                            onRestore: () => _restore(versions[index]),
+                          ),
+                    );
+                  },
+            ),
+          ),
+        ],
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Закрыть'),
+      ),
+    ],
+  );
+}
+
+final class _DocumentVersionCard extends StatelessWidget {
+  const _DocumentVersionCard({
+    required this.version,
+    required this.readOnly,
+    required this.restoring,
+    required this.onRestore,
+  });
+
+  final JsonMap version;
+  final bool readOnly;
+  final bool restoring;
+  final VoidCallback onRestore;
+
+  @override
+  Widget build(BuildContext context) {
+    final int revision = requireInt(version, 'revision');
+    final bool current = version['is_current'] == true;
+    final String content = requireString(version, 'content').trim();
+    final String preview = content.isEmpty
+        ? 'Пустой документ'
+        : content.length > 180
+        ? '${content.substring(0, 180)}…'
+        : content;
+    final DateTime? createdAt = DateTime.tryParse(
+      requireString(version, 'created_at'),
+    )?.toLocal();
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Text(
+                  'Версия $revision',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(width: 8),
+                if (current)
+                  const Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text('Текущая'),
+                  ),
+                const Spacer(),
+                Text(
+                  _formatVersionDate(createdAt),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            Text(
+              requireString(version, 'title'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              preview.replaceAll('\n', ' '),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (!current) ...<Widget>[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonalIcon(
+                  onPressed: readOnly || restoring ? null : onRestore,
+                  icon: restoring
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.restore, size: 18),
+                  label: const Text('Восстановить'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formatVersionDate(DateTime? value) {
+  if (value == null) {
+    return '';
+  }
+  String two(int part) => part.toString().padLeft(2, '0');
+  return '${two(value.day)}.${two(value.month)}.${value.year} '
+      '${two(value.hour)}:${two(value.minute)}';
 }
 
 Widget _blockedMarkdownImage(Uri uri, String? title, String? alt) => Tooltip(

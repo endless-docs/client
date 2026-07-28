@@ -30,6 +30,33 @@ final class CommandReceipt {
   final bool wasReplay;
 }
 
+final class DocumentVersion {
+  const DocumentVersion({
+    required this.revision,
+    required this.title,
+    required this.content,
+    required this.documentType,
+    required this.createdAt,
+    required this.isCurrent,
+  });
+
+  final int revision;
+  final String title;
+  final String content;
+  final DocumentType documentType;
+  final DateTime createdAt;
+  final bool isCurrent;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'revision': revision,
+    'title': title,
+    'content': content,
+    'document_type': documentType.wireName,
+    'created_at': createdAt.toUtc().toIso8601String(),
+    'is_current': isCurrent,
+  };
+}
+
 final class BlockDraft {
   const BlockDraft({this.id, required this.type, required this.payload});
 
@@ -197,6 +224,75 @@ final class ClientApplicationService {
       );
     }
     return document;
+  }
+
+  Future<List<DocumentVersion>> listDocumentVersions(String documentId) async {
+    final Document document = await getDocument(documentId);
+    await getWorkspace(document.workspaceId);
+    return _store.read((ClientStoreReader reader) async {
+      final List<Operation> operations =
+          (await reader.listOperations())
+              .where(
+                (Operation operation) =>
+                    operation.objectId == documentId &&
+                    (operation.type == 'CreateDocument' ||
+                        operation.type == 'ApplyBlockChanges'),
+              )
+              .toList()
+            ..sort(
+              (Operation left, Operation right) =>
+                  left.sequence.compareTo(right.sequence),
+            );
+      DocumentType documentType = DocumentType.plain;
+      final List<DocumentVersion> versions = <DocumentVersion>[];
+      for (final Operation operation in operations) {
+        final Object? wireDocumentType = operation.payload['document_type'];
+        if (wireDocumentType is String) {
+          try {
+            documentType = documentTypeFromWireName(wireDocumentType);
+          } on ArgumentError {
+            documentType = DocumentType.plain;
+          }
+        }
+        final String title = operation.payload['title'] is String
+            ? operation.payload['title']! as String
+            : document.title;
+        versions.add(
+          DocumentVersion(
+            revision: operation.resultRevision,
+            title: title,
+            content: operation.type == 'CreateDocument'
+                ? ''
+                : _operationDocumentContent(operation.payload),
+            documentType: documentType,
+            createdAt: operation.createdAt,
+            isCurrent: operation.resultRevision == document.revision,
+          ),
+        );
+      }
+
+      if (!versions.any(
+        (DocumentVersion version) => version.revision == document.revision,
+      )) {
+        versions.add(
+          DocumentVersion(
+            revision: document.revision,
+            title: document.title,
+            content: _documentContent(document),
+            documentType: document.documentType,
+            createdAt: document.updatedAt,
+            isCurrent: true,
+          ),
+        );
+      }
+      versions.sort((DocumentVersion left, DocumentVersion right) {
+        final int revision = right.revision.compareTo(left.revision);
+        return revision != 0
+            ? revision
+            : right.createdAt.compareTo(left.createdAt);
+      });
+      return List<DocumentVersion>.unmodifiable(versions);
+    });
   }
 
   Future<List<Attachment>> listAttachments(
@@ -1011,6 +1107,31 @@ final class ClientApplicationService {
       position: position,
       revision: (previous?.revision ?? 0) + 1,
     );
+  }
+
+  static String _operationDocumentContent(Map<String, Object?> payload) {
+    final Object? blocks = payload['blocks'];
+    if (blocks is! List<Object?> || blocks.isEmpty) {
+      return '';
+    }
+    final Object? first = blocks.first;
+    if (first is! Map<Object?, Object?>) {
+      return '';
+    }
+    final Object? blockPayload = first['payload'];
+    if (blockPayload is! Map<Object?, Object?>) {
+      return '';
+    }
+    final Object? text = blockPayload['text'];
+    return text is String ? text : '';
+  }
+
+  static String _documentContent(Document document) {
+    if (document.blocks.isEmpty) {
+      return '';
+    }
+    final Object? text = document.blocks.first.payload['text'];
+    return text is String ? text : '';
   }
 
   Future<void> _validateParent(

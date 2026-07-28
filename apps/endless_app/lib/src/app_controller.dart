@@ -487,6 +487,36 @@ final class AppController extends ChangeNotifier {
     return saved;
   }
 
+  Future<List<JsonMap>> listSelectedDocumentVersions() async {
+    await flushPendingChanges();
+    final String? documentId = selectedDocumentId;
+    if (documentId == null) {
+      return const <JsonMap>[];
+    }
+    return _withReconnect(
+      (EndlessLocalApi client) => client.listDocumentVersions(documentId),
+    );
+  }
+
+  Future<void> restoreDocumentVersion(JsonMap version) async {
+    await flushPendingChanges();
+    final JsonMap? document = selectedDocument;
+    if (document == null) {
+      throw StateError('Select a document first.');
+    }
+    if (!isSelectedWorkspaceWritable) {
+      throw StateError('Archived workspace is read-only.');
+    }
+    await saveDocument(
+      documentId: requireString(document, 'document_id'),
+      title: requireString(version, 'title'),
+      text: requireString(version, 'content'),
+      expectedRevision: requireInt(document, 'revision'),
+      blockId: _documentBlockId(document),
+      documentType: requireString(version, 'document_type'),
+    );
+  }
+
   Future<void> setSelectedDocumentType(String documentType) async {
     if (!const <String>{
       'plain',

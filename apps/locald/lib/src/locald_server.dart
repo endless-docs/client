@@ -339,6 +339,7 @@ final class LocaldServer {
       'profile_id': paths.profileId,
       'capabilities': <String>[
         'documents',
+        'document_versions',
         'offline',
         'command_deduplication',
         'search',
@@ -373,6 +374,11 @@ final class LocaldServer {
       'GetDocument' => (await _application.getDocument(
         requireString(payload, 'document_id'),
       )).toJson(),
+      'ListDocumentVersions' => <String, Object?>{
+        'versions': (await _application.listDocumentVersions(
+          requireString(payload, 'document_id'),
+        )).map((DocumentVersion version) => version.toJson()).toList(),
+      },
       'ListAttachments' => <String, Object?>{
         'attachments': (await _application.listAttachments(
           requireString(payload, 'document_id'),
