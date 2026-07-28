@@ -5,12 +5,25 @@ import 'dart:ui' show AppExitResponse;
 import 'package:codex_app_server/codex_app_server.dart';
 import 'package:endless_app/src/app_controller.dart';
 import 'package:endless_app/src/endless_app.dart';
+import 'package:endless_app/src/endless_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:local_api/local_api.dart';
 import 'package:local_api_client/local_api_client.dart';
 
 void main() {
+  test('uses the Endless Docs v1.1 semantic brand colors', () {
+    final ThemeData light = EndlessTheme.light();
+    final ThemeData dark = EndlessTheme.dark();
+
+    expect(light.scaffoldBackgroundColor, EndlessBrand.paper);
+    expect(light.colorScheme.primary, EndlessBrand.deepMint);
+    expect(light.colorScheme.surface, EndlessBrand.white);
+    expect(dark.scaffoldBackgroundColor, EndlessBrand.darkBackground);
+    expect(dark.colorScheme.primary, EndlessBrand.mint);
+    expect(dark.colorScheme.surface, EndlessBrand.ink);
+  });
+
   testWidgets('creates and autosaves a document entirely through Local API', (
     WidgetTester tester,
   ) async {

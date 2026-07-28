@@ -7,6 +7,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:local_api/local_api.dart';
 
 import 'app_controller.dart';
+import 'endless_theme.dart';
 
 final class EndlessApp extends StatelessWidget {
   const EndlessApp({required this.controller, super.key});
@@ -17,22 +18,11 @@ final class EndlessApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'Endless Docs',
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xff5f5ce6),
-        brightness: Brightness.light,
-      ),
-      useMaterial3: true,
-      visualDensity: VisualDensity.standard,
-    ),
-    darkTheme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xff9b99ff),
-        brightness: Brightness.dark,
-      ),
-      useMaterial3: true,
-      visualDensity: VisualDensity.standard,
-    ),
+    theme: EndlessTheme.light(),
+    darkTheme: EndlessTheme.dark(),
+    themeMode: ThemeMode.system,
+    themeAnimationDuration: const Duration(milliseconds: 260),
+    themeAnimationCurve: const Cubic(0.2, 0.8, 0.2, 1),
     home: _Home(controller: controller),
   );
 }
@@ -93,13 +83,28 @@ final class _StartingView extends StatelessWidget {
     body: Center(
       child: Semantics(
         label: 'Запуск локального хранилища',
-        child: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text('Запускаем локальное хранилище…'),
-          ],
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const _BrandLogo(width: 230),
+                const SizedBox(height: 32),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 20),
+                Text(
+                  'Запускаем локальное хранилище…',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Знания под вашим контролем.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     ),
@@ -117,26 +122,35 @@ final class _FailureView extends StatelessWidget {
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 460),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const Icon(Icons.storage_rounded, size: 56),
-              const SizedBox(height: 20),
-              Text(
-                'Локальное хранилище недоступно',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Повторить'),
-              ),
-            ],
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const _BrandLogo(width: 210),
+                const SizedBox(height: 32),
+                Icon(
+                  Icons.storage_rounded,
+                  size: 48,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Локальное хранилище недоступно',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 12),
+                Text(message, textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Повторить'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -150,36 +164,117 @@ final class _ReadyView extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Endless Docs'),
-      actions: <Widget>[
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Chip(
-            avatar: controller.reconnecting
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.cloud_off_rounded, size: 18),
-            label: Text(
-              controller.reconnecting
-                  ? 'Переподключение…'
-                  : 'Сохранение локально',
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: const _BrandLogo(width: 222, forceDarkBackgroundVariant: true),
+        actions: <Widget>[
+          Padding(
+            padding: const EdgeInsets.only(right: 24),
+            child: _LocalStatusBadge(reconnecting: controller.reconnecting),
+          ),
+        ],
+      ),
+      body: Row(
+        children: <Widget>[
+          SizedBox(width: 312, child: _NavigationPane(controller: controller)),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: ColoredBox(
+              color: colors.surface,
+              child: _ContentPane(controller: controller),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _BrandLogo extends StatelessWidget {
+  const _BrandLogo({
+    required this.width,
+    this.forceDarkBackgroundVariant = false,
+  });
+
+  final double width;
+  final bool forceDarkBackgroundVariant;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool dark =
+        forceDarkBackgroundVariant ||
+        Theme.of(context).brightness == Brightness.dark;
+    return Semantics(
+      image: true,
+      label: 'Endless Docs',
+      child: Image.asset(
+        dark
+            ? 'assets/brand/endless-docs-logo-horizontal-dark.png'
+            : 'assets/brand/endless-docs-logo-horizontal-light.png',
+        width: width,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        excludeFromSemantics: true,
+      ),
+    );
+  }
+}
+
+final class _LocalStatusBadge extends StatelessWidget {
+  const _LocalStatusBadge({required this.reconnecting});
+
+  final bool reconnecting;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final String label = reconnecting
+        ? 'ПЕРЕПОДКЛЮЧЕНИЕ…'
+        : 'ЛОКАЛЬНО  /  СОХРАНЕНО';
+    return Semantics(
+      label: reconnecting
+          ? 'Переподключение к локальному хранилищу'
+          : 'Данные сохранены локально',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.primaryContainer,
+          borderRadius: BorderRadius.circular(999),
         ),
-      ],
-    ),
-    body: Row(
-      children: <Widget>[
-        SizedBox(width: 300, child: _NavigationPane(controller: controller)),
-        const VerticalDivider(width: 1),
-        Expanded(child: _ContentPane(controller: controller)),
-      ],
-    ),
-  );
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (reconnecting)
+                SizedBox.square(
+                  dimension: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colors.primary,
+                  ),
+                )
+              else
+                Icon(Icons.circle, size: 10, color: colors.primary),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: TextStyle(
+                  color: colors.primary,
+                  fontFamily: 'IBM Plex Mono',
+                  fontFamilyFallback: const <String>['Consolas', 'Courier New'],
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 final class _ContentPane extends StatelessWidget {
@@ -236,8 +331,12 @@ final class _NavigationPane extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 22, 20, 2),
+          child: _SectionLabel('РАБОЧЕЕ ПРОСТРАНСТВО'),
+        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+          padding: const EdgeInsets.fromLTRB(16, 6, 8, 12),
           child: Row(
             children: <Widget>[
               Expanded(
@@ -335,11 +434,11 @@ final class _NavigationPane extends StatelessWidget {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+          padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
           child: Row(
             children: <Widget>[
               Expanded(
-                child: Text(
+                child: _SectionLabel(
                   controller.showRecycleBin ? 'Корзина' : 'Документы',
                 ),
               ),
@@ -392,6 +491,7 @@ final class _NavigationPane extends StatelessWidget {
                   ),
                 )
               : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
                   itemCount: controller.documentTree.length,
                   itemBuilder: (BuildContext context, int index) {
                     final DocumentTreeEntry entry =
@@ -470,6 +570,27 @@ final class _NavigationPane extends StatelessWidget {
                 ),
         ),
       ],
+    ),
+  );
+}
+
+final class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    label.toUpperCase(),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      fontFamily: 'IBM Plex Mono',
+      fontFamilyFallback: const <String>['Consolas', 'Courier New'],
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.9,
     ),
   );
 }
@@ -657,29 +778,45 @@ final class _RecycleBinView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(
-          Icons.delete_sweep_outlined,
-          size: 72,
-          color: Theme.of(context).colorScheme.outline,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const _BrandStateIcon(icon: Icons.delete_sweep_outlined),
+              const SizedBox(height: 24),
+              Text(
+                controller.deletedDocuments.isEmpty
+                    ? 'Корзина пуста'
+                    : 'Выберите документ слева для восстановления',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Удалённые документы остаются на устройстве, пока вы '
+                'не восстановите их.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 24),
+              OutlinedButton.icon(
+                onPressed: () => _runUiAction(
+                  context,
+                  () => controller.setRecycleBin(false),
+                ),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('К документам'),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 16),
-        Text(
-          controller.deletedDocuments.isEmpty
-              ? 'Корзина пуста'
-              : 'Выберите документ слева для восстановления',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 20),
-        OutlinedButton.icon(
-          onPressed: () =>
-              _runUiAction(context, () => controller.setRecycleBin(false)),
-          icon: const Icon(Icons.arrow_back),
-          label: const Text('К документам'),
-        ),
-      ],
+      ),
     ),
   );
 }
@@ -695,42 +832,83 @@ final class _EmptyDocumentView extends StatelessWidget {
     final bool archived =
         !noWorkspace && !controller.isSelectedWorkspaceWritable;
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(
-            Icons.edit_note_rounded,
-            size: 72,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            noWorkspace
-                ? 'Создайте локальное пространство'
-                : archived
-                ? 'Пространство находится в архиве'
-                : 'Выберите или создайте документ',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            onPressed: noWorkspace
-                ? () => _createWorkspace(context, controller)
-                : archived
-                ? () => _runUiAction(
-                    context,
-                    () => controller.setSelectedWorkspaceArchived(false),
-                  )
-                : () => _createDocument(context, controller),
-            child: Text(
-              noWorkspace
-                  ? 'Создать пространство'
-                  : archived
-                  ? 'Вернуть из архива'
-                  : 'Создать документ',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const _BrandStateIcon(icon: Icons.edit_note_rounded),
+                const SizedBox(height: 24),
+                Text(
+                  noWorkspace
+                      ? 'Создайте локальное пространство'
+                      : archived
+                      ? 'Пространство находится в архиве'
+                      : 'Выберите или создайте документ',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  noWorkspace
+                      ? 'Документы останутся доступными на этом устройстве — '
+                            'интернет не требуется.'
+                      : archived
+                      ? 'Верните пространство из архива, чтобы снова '
+                            'редактировать документы.'
+                      : 'Знания под вашим контролем — начните с нового '
+                            'локального документа.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: noWorkspace
+                      ? () => _createWorkspace(context, controller)
+                      : archived
+                      ? () => _runUiAction(
+                          context,
+                          () => controller.setSelectedWorkspaceArchived(false),
+                        )
+                      : () => _createDocument(context, controller),
+                  child: Text(
+                    noWorkspace
+                        ? 'Создать пространство'
+                        : archived
+                        ? 'Вернуть из архива'
+                        : 'Создать документ',
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _BrandStateIcon extends StatelessWidget {
+  const _BrandStateIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.primaryContainer,
+        borderRadius: BorderRadius.circular(EndlessBrand.marketingRadius),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Icon(icon, size: 36, color: colors.primary),
       ),
     );
   }
@@ -909,10 +1087,12 @@ final class _DocumentEditorState extends State<DocumentEditor> {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(40, 24, 40, 20),
+    padding: const EdgeInsets.fromLTRB(40, 28, 40, 20),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        const _SectionLabel('ЛОКАЛЬНЫЙ ДОКУМЕНТ'),
+        const SizedBox(height: 6),
         Row(
           children: <Widget>[
             Expanded(
@@ -924,6 +1104,8 @@ final class _DocumentEditorState extends State<DocumentEditor> {
                 decoration: const InputDecoration(
                   hintText: 'Название',
                   border: InputBorder.none,
+                  filled: false,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
             ),
@@ -958,6 +1140,7 @@ final class _DocumentEditorState extends State<DocumentEditor> {
               ),
           ],
         ),
+        const SizedBox(height: 10),
         if (_state == _SaveState.conflict)
           MaterialBanner(
             content: const Text(
@@ -1015,9 +1198,12 @@ final class _DocumentEditorState extends State<DocumentEditor> {
         minLines: null,
         textAlignVertical: TextAlignVertical.top,
         keyboardType: TextInputType.multiline,
+        style: Theme.of(context).textTheme.bodyLarge,
         decoration: const InputDecoration(
           hintText: 'Начните писать…',
           border: InputBorder.none,
+          filled: false,
+          contentPadding: EdgeInsets.symmetric(vertical: 20),
         ),
       );
     }
@@ -1031,7 +1217,7 @@ final class _DocumentEditorState extends State<DocumentEditor> {
       key: const ValueKey<String>('document-editor-preview'),
       data: _content.text,
       selectable: true,
-      padding: const EdgeInsets.symmetric(vertical: 16),
+      padding: const EdgeInsets.symmetric(vertical: 20),
       imageBuilder: _blockedMarkdownImage,
     );
   }

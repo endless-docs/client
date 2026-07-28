@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "dev.endlessdocs" "\0"
-            VALUE "FileDescription", "endless_app" "\0"
+            VALUE "FileDescription", "Endless Docs" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "endless_app" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 dev.endlessdocs. All rights reserved." "\0"
             VALUE "OriginalFilename", "endless_app.exe" "\0"
-            VALUE "ProductName", "endless_app" "\0"
+            VALUE "ProductName", "Endless Docs" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
