@@ -525,6 +525,19 @@ void main() {
       '## Context\nКонтекст решения.',
     );
     expect(controller.canUndoAiEdit, isTrue);
+    expect(find.text('Ход работы'), findsOneWidget);
+    expect(
+      find.textContaining('Проверяю структуру документа.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Формирую полную обновлённую версию.'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('ai-progress-complete')),
+      findsOneWidget,
+    );
     expect(
       find.text('Enter — отправить, Shift+Enter — новая строка'),
       findsNothing,
@@ -542,6 +555,44 @@ void main() {
 
     expect(controller.selectedDocument!['title'], 'Черновик');
     expect(api.savedTextByDocument[controller.selectedDocumentId], '');
+  });
+
+  testWidgets('shows Codex reasoning summaries while a request is running', (
+    WidgetTester tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final _FakeLocalApi api = _FakeLocalApi();
+    final _BlockingDocumentAi ai = _BlockingDocumentAi();
+    final AppController controller = AppController(
+      bootstrap: () async => api,
+      documentAi: ai,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(EndlessApp(controller: controller));
+    await controller.initialize();
+    await controller.createWorkspace('Личное');
+    await controller.createDocument('Черновик', documentType: 'adr');
+    await controller.setAiPanelOpen(true);
+    await tester.pump();
+
+    final Future<void> request = controller.runDocumentAi('Обнови');
+    await ai.started.future;
+    await tester.pump();
+
+    expect(find.text('Codex работает'), findsOneWidget);
+    expect(find.text('Изучаю текущий документ.'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('ai-progress-active')),
+      findsOneWidget,
+    );
+
+    ai.complete();
+    await request;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ход работы'), findsOneWidget);
+    expect(find.text('Документ обновлён.'), findsOneWidget);
   });
 
   test('does not apply an AI result over a newer manual revision', () async {
@@ -591,13 +642,28 @@ class _FakeDocumentAi implements DocumentAi {
   Future<DocumentAiResult> run({
     required DocumentAiSnapshot snapshot,
     required String instruction,
-  }) async => const DocumentAiResult(
-    action: DocumentAiAction.replaceDocument,
-    message: 'Документ обновлён.',
-    questions: <String>[],
-    title: 'ADR: Решение',
-    content: '## Context\nКонтекст решения.',
-  );
+    DocumentAiProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(
+      const DocumentAiProgress(
+        sectionIndex: 0,
+        summary: 'Проверяю структуру документа.',
+      ),
+    );
+    onProgress?.call(
+      const DocumentAiProgress(
+        sectionIndex: 1,
+        summary: 'Формирую полную обновлённую версию.',
+      ),
+    );
+    return const DocumentAiResult(
+      action: DocumentAiAction.replaceDocument,
+      message: 'Документ обновлён.',
+      questions: <String>[],
+      title: 'ADR: Решение',
+      content: '## Context\nКонтекст решения.',
+    );
+  }
 }
 
 final class _BlockingDocumentAi extends _FakeDocumentAi {
@@ -610,10 +676,21 @@ final class _BlockingDocumentAi extends _FakeDocumentAi {
   Future<DocumentAiResult> run({
     required DocumentAiSnapshot snapshot,
     required String instruction,
+    DocumentAiProgressCallback? onProgress,
   }) async {
+    onProgress?.call(
+      const DocumentAiProgress(
+        sectionIndex: 0,
+        summary: 'Изучаю текущий документ.',
+      ),
+    );
     started.complete();
     await _release.future;
-    return super.run(snapshot: snapshot, instruction: instruction);
+    return super.run(
+      snapshot: snapshot,
+      instruction: instruction,
+      onProgress: onProgress,
+    );
   }
 }
 

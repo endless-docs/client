@@ -45,11 +45,28 @@ final class DocumentAiResult {
   final String? content;
 }
 
+enum DocumentAiProgressKind { status, reasoningSummary }
+
+final class DocumentAiProgress {
+  const DocumentAiProgress({
+    required this.sectionIndex,
+    required this.summary,
+    this.kind = DocumentAiProgressKind.reasoningSummary,
+  });
+
+  final int sectionIndex;
+  final String summary;
+  final DocumentAiProgressKind kind;
+}
+
+typedef DocumentAiProgressCallback = void Function(DocumentAiProgress progress);
+
 abstract interface class DocumentAi {
   Future<DocumentAiAvailability> checkAvailability();
   Future<DocumentAiResult> run({
     required DocumentAiSnapshot snapshot,
     required String instruction,
+    DocumentAiProgressCallback? onProgress,
   });
   Future<void> cancel();
   Future<void> reset();
@@ -86,6 +103,7 @@ final class CodexDocumentAi implements DocumentAi {
   Future<DocumentAiResult> run({
     required DocumentAiSnapshot snapshot,
     required String instruction,
+    DocumentAiProgressCallback? onProgress,
   }) async {
     final String normalizedInstruction = instruction.trim();
     if (normalizedInstruction.isEmpty) {
@@ -121,6 +139,23 @@ final class CodexDocumentAi implements DocumentAi {
       threadId: threadId,
       input: _prompt(snapshot, normalizedInstruction),
       outputSchema: _outputSchema,
+      onProgress: onProgress == null
+          ? null
+          : (CodexTurnProgress progress) {
+              final String text = progress.text.trim();
+              if (text.isNotEmpty) {
+                onProgress(
+                  DocumentAiProgress(
+                    sectionIndex: progress.sectionIndex,
+                    summary: text,
+                    kind:
+                        progress.kind == CodexTurnProgressKind.reasoningSummary
+                        ? DocumentAiProgressKind.reasoningSummary
+                        : DocumentAiProgressKind.status,
+                  ),
+                );
+              }
+            },
     );
     _activeTurn = turn;
     try {

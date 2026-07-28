@@ -11,13 +11,18 @@ import 'package:platform_runtime/platform_runtime.dart';
 
 enum AppPhase { starting, ready, failed }
 
-enum AiMessageRole { user, assistant }
+enum AiMessageRole { user, progress, assistant }
 
 final class AiConversationMessage {
-  const AiConversationMessage({required this.role, required this.text});
+  const AiConversationMessage({
+    required this.role,
+    required this.text,
+    this.active = false,
+  });
 
   final AiMessageRole role;
   final String text;
+  final bool active;
 }
 
 typedef LocalApiBootstrap = Future<EndlessLocalApi> Function();
@@ -80,6 +85,8 @@ final class AppController extends ChangeNotifier {
   bool aiChecking = false;
   bool aiRunning = false;
   _AiUndoSnapshot? _aiUndo;
+  int? _activeAiProgressMessage;
+  final Map<int, String> _aiProgressSections = <int, String>{};
   int _searchRequest = 0;
 
   bool get hasSearch => searchQuery.isNotEmpty;
@@ -536,6 +543,8 @@ final class AppController extends ChangeNotifier {
       // AI is optional: a failed child process must not block local metadata.
     }
     aiMessages = <AiConversationMessage>[];
+    _activeAiProgressMessage = null;
+    _aiProgressSections.clear();
     await saveDocument(
       documentId: requireString(document, 'document_id'),
       title: requireString(document, 'title'),
@@ -605,7 +614,14 @@ final class AppController extends ChangeNotifier {
         role: AiMessageRole.user,
         text: normalizedInstruction,
       ),
+      const AiConversationMessage(
+        role: AiMessageRole.progress,
+        text: 'Анализирую документ…',
+        active: true,
+      ),
     ];
+    _activeAiProgressMessage = aiMessages.length - 1;
+    _aiProgressSections.clear();
     aiRunning = true;
     aiError = null;
     _aiUndo = null;
@@ -618,6 +634,7 @@ final class AppController extends ChangeNotifier {
           content: sourceText,
         ),
         instruction: normalizedInstruction,
+        onProgress: _updateAiProgress,
       );
       final String assistantText = <String>[
         if (result.message.trim().isNotEmpty) result.message.trim(),
@@ -653,6 +670,7 @@ final class AppController extends ChangeNotifier {
           appliedRevision: requireInt(saved, 'revision'),
         );
       }
+      _finishAiProgress();
       aiMessages = <AiConversationMessage>[
         ...aiMessages,
         AiConversationMessage(
@@ -664,18 +682,74 @@ final class AppController extends ChangeNotifier {
       ];
       aiAvailability = DocumentAiAvailability.ready;
     } on CodexException catch (error) {
+      _finishAiProgress();
       aiError = error.message;
       if (error.code == 'CodexAuthRequired') {
         aiAvailability = DocumentAiAvailability.authRequired;
       }
     } on LocalApiException catch (error) {
+      _finishAiProgress();
       aiError = error.code == 'RevisionConflict'
           ? 'Документ изменился. Повторите запрос для актуальной версии.'
           : error.message;
     } finally {
+      _finishAiProgress();
       aiRunning = false;
       notifyListeners();
     }
+  }
+
+  void _updateAiProgress(DocumentAiProgress progress) {
+    final int? messageIndex = _activeAiProgressMessage;
+    if (messageIndex == null ||
+        messageIndex < 0 ||
+        messageIndex >= aiMessages.length) {
+      return;
+    }
+    _aiProgressSections[progress.sectionIndex] = progress.summary;
+    final List<int> indices = _aiProgressSections.keys.toList()..sort();
+    final String text = indices
+        .map((int index) => _aiProgressSections[index]!.trim())
+        .where((String section) => section.isNotEmpty)
+        .join('\n\n');
+    if (text.isEmpty) {
+      return;
+    }
+    aiMessages = <AiConversationMessage>[
+      ...aiMessages.take(messageIndex),
+      AiConversationMessage(
+        role: AiMessageRole.progress,
+        text: text,
+        active: true,
+      ),
+      ...aiMessages.skip(messageIndex + 1),
+    ];
+    notifyListeners();
+  }
+
+  void _finishAiProgress() {
+    final int? messageIndex = _activeAiProgressMessage;
+    _activeAiProgressMessage = null;
+    if (messageIndex == null ||
+        messageIndex < 0 ||
+        messageIndex >= aiMessages.length) {
+      _aiProgressSections.clear();
+      return;
+    }
+    if (_aiProgressSections.isEmpty) {
+      aiMessages = <AiConversationMessage>[
+        ...aiMessages.take(messageIndex),
+        ...aiMessages.skip(messageIndex + 1),
+      ];
+    } else {
+      final AiConversationMessage progress = aiMessages[messageIndex];
+      aiMessages = <AiConversationMessage>[
+        ...aiMessages.take(messageIndex),
+        AiConversationMessage(role: progress.role, text: progress.text),
+        ...aiMessages.skip(messageIndex + 1),
+      ];
+    }
+    _aiProgressSections.clear();
   }
 
   Future<void> cancelDocumentAi() async {
@@ -974,6 +1048,8 @@ final class AppController extends ChangeNotifier {
     aiError = null;
     aiRunning = false;
     _aiUndo = null;
+    _activeAiProgressMessage = null;
+    _aiProgressSections.clear();
   }
 
   static String _documentText(JsonMap document) {

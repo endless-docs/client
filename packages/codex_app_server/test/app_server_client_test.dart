@@ -43,7 +43,72 @@ void main() {
         'turn/start',
       ]),
     );
+    final Map<String, Object?> turnRequest = transport.receivedRequests
+        .firstWhere(
+          (Map<String, Object?> request) => request['method'] == 'turn/start',
+        );
+    expect(
+      (turnRequest['params']! as Map<String, Object?>)['summary'],
+      'concise',
+    );
   });
+
+  test(
+    'streams readable reasoning summaries and ignores raw reasoning',
+    () async {
+      final _FakeTransport transport = _FakeTransport(
+        turnResult: jsonEncode(<String, Object?>{
+          'action': 'no_change',
+          'message': 'Готово.',
+          'questions': <String>[],
+          'title': null,
+          'content': null,
+        }),
+        reasoningSummary: 'Проверяю структуру документа.',
+      );
+      final CodexAppServerClient client = await CodexAppServerClient.connect(
+        transport,
+      );
+      addTearDown(client.close);
+      final List<CodexTurnProgress> progress = <CodexTurnProgress>[];
+
+      final CodexTurnHandle turn = await client.startTurn(
+        threadId: 'thread-1',
+        input: 'Review',
+        outputSchema: const <String, Object?>{'type': 'object'},
+        onProgress: progress.add,
+      );
+
+      await turn.result;
+      final Iterable<CodexTurnProgress> summaries = progress.where(
+        (CodexTurnProgress event) =>
+            event.kind == CodexTurnProgressKind.reasoningSummary,
+      );
+      expect(
+        summaries.map((CodexTurnProgress summary) => summary.text),
+        <String>['Проверяю', 'Проверяю структуру документа.'],
+      );
+      expect(
+        summaries.every(
+          (CodexTurnProgress summary) =>
+              !summary.text.contains('private chain'),
+        ),
+        isTrue,
+      );
+      expect(
+        progress
+            .where(
+              (CodexTurnProgress event) =>
+                  event.kind == CodexTurnProgressKind.status,
+            )
+            .map((CodexTurnProgress event) => event.text),
+        containsAll(<String>[
+          'Анализирую документ…',
+          'Формирую итоговый результат…',
+        ]),
+      );
+    },
+  );
 
   test('fails pending requests on malformed JSONL and process exit', () async {
     final _FakeTransport malformed = _FakeTransport(
@@ -157,6 +222,7 @@ void main() {
           'title': 'ADR: Хранилище',
           'content': '## Context\nЛокальное хранение.',
         }),
+        reasoningSummary: 'Сверяю структуру ADR.',
       );
       final CodexAppServerClient client = await CodexAppServerClient.connect(
         transport,
@@ -166,6 +232,7 @@ void main() {
       );
       addTearDown(ai.close);
 
+      final List<DocumentAiProgress> progress = <DocumentAiProgress>[];
       final DocumentAiResult result = await ai.run(
         snapshot: const DocumentAiSnapshot(
           documentType: 'adr',
@@ -173,10 +240,21 @@ void main() {
           content: '',
         ),
         instruction: 'Сформируй ADR',
+        onProgress: progress.add,
       );
 
       expect(result.action, DocumentAiAction.replaceDocument);
       expect(result.title, 'ADR: Хранилище');
+      expect(
+        progress
+            .where(
+              (DocumentAiProgress event) =>
+                  event.kind == DocumentAiProgressKind.reasoningSummary,
+            )
+            .last
+            .summary,
+        'Сверяю структуру ADR.',
+      );
 
       await expectLater(
         ai.run(
@@ -296,6 +374,7 @@ final class _FakeTransport implements CodexTransport {
     required this.turnResult,
     this.ignoredMethods = const <String>{},
     this.autoCompleteTurn = true,
+    this.reasoningSummary,
   }) {
     _input.stream
         .transform(utf8.decoder)
@@ -306,6 +385,7 @@ final class _FakeTransport implements CodexTransport {
   final String turnResult;
   final Set<String> ignoredMethods;
   final bool autoCompleteTurn;
+  final String? reasoningSummary;
   final StreamController<List<int>> _input = StreamController<List<int>>();
   final StreamController<List<int>> _output = StreamController<List<int>>();
   final StreamController<List<int>> _error = StreamController<List<int>>();
@@ -407,6 +487,68 @@ final class _FakeTransport implements CodexTransport {
           return;
         }
         scheduleMicrotask(() {
+          _send(<String, Object?>{
+            'method': 'turn/started',
+            'params': <String, Object?>{
+              'threadId': 'thread-1',
+              'turn': <String, Object?>{
+                'id': 'turn-1',
+                'items': <Object?>[],
+                'status': 'inProgress',
+              },
+            },
+          });
+          final String? summary = reasoningSummary;
+          if (summary != null) {
+            final int split = summary.indexOf(' ');
+            final String first = split < 0
+                ? summary
+                : summary.substring(0, split);
+            final String second = split < 0 ? '' : summary.substring(split);
+            _send(<String, Object?>{
+              'method': 'item/reasoning/summaryTextDelta',
+              'params': <String, Object?>{
+                'threadId': 'thread-1',
+                'turnId': 'turn-1',
+                'itemId': 'reasoning-1',
+                'summaryIndex': 0,
+                'delta': first,
+              },
+            });
+            _send(<String, Object?>{
+              'method': 'item/reasoning/textDelta',
+              'params': <String, Object?>{
+                'threadId': 'thread-1',
+                'turnId': 'turn-1',
+                'itemId': 'reasoning-1',
+                'delta': 'private chain',
+              },
+            });
+            if (second.isNotEmpty) {
+              _send(<String, Object?>{
+                'method': 'item/reasoning/summaryTextDelta',
+                'params': <String, Object?>{
+                  'threadId': 'thread-1',
+                  'turnId': 'turn-1',
+                  'itemId': 'reasoning-1',
+                  'summaryIndex': 0,
+                  'delta': second,
+                },
+              });
+            }
+          }
+          _send(<String, Object?>{
+            'method': 'item/started',
+            'params': <String, Object?>{
+              'threadId': 'thread-1',
+              'turnId': 'turn-1',
+              'item': <String, Object?>{
+                'id': 'agent-1',
+                'type': 'agentMessage',
+                'text': '',
+              },
+            },
+          });
           _send(<String, Object?>{
             'method': 'item/agentMessage/delta',
             'params': <String, Object?>{

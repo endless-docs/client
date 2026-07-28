@@ -238,6 +238,24 @@ final class CodexTurnHandle {
   final Future<String> result;
 }
 
+enum CodexTurnProgressKind { status, reasoningSummary }
+
+final class CodexTurnProgress {
+  const CodexTurnProgress({
+    required this.turnId,
+    required this.sectionIndex,
+    required this.text,
+    required this.kind,
+  });
+
+  final String turnId;
+  final int sectionIndex;
+  final String text;
+  final CodexTurnProgressKind kind;
+}
+
+typedef CodexTurnProgressCallback = void Function(CodexTurnProgress progress);
+
 final class CodexAppServerClient {
   CodexAppServerClient._(
     this._transport,
@@ -258,6 +276,12 @@ final class CodexAppServerClient {
       <String, Completer<CodexJsonMap>>{};
   final Map<String, CodexJsonMap> _earlyTurnCompletions =
       <String, CodexJsonMap>{};
+  final Map<String, Map<int, StringBuffer>> _turnReasoningSummaries =
+      <String, Map<int, StringBuffer>>{};
+  final Map<String, CodexTurnProgressCallback> _progressCallbacks =
+      <String, CodexTurnProgressCallback>{};
+  final Map<String, List<CodexTurnProgress>> _earlyProgress =
+      <String, List<CodexTurnProgress>>{};
   final List<String> _safeStderr = <String>[];
   StreamSubscription<String>? _stdoutSubscription;
   StreamSubscription<String>? _stderrSubscription;
@@ -379,6 +403,7 @@ final class CodexAppServerClient {
     required String threadId,
     required String input,
     required CodexJsonMap outputSchema,
+    CodexTurnProgressCallback? onProgress,
   }) async {
     final CodexJsonMap response = await _request(
       'turn/start',
@@ -388,6 +413,7 @@ final class CodexAppServerClient {
           <String, Object?>{'type': 'text', 'text': input},
         ],
         'outputSchema': outputSchema,
+        'summary': 'concise',
         'approvalPolicy': 'never',
         'sandboxPolicy': <String, Object?>{
           'type': 'readOnly',
@@ -402,11 +428,24 @@ final class CodexAppServerClient {
     if (early != null) {
       completion.complete(early);
     }
-    return CodexTurnHandle(
-      threadId: threadId,
-      turnId: turnId,
-      result: _finishTurn(turnId, completion.future),
-    );
+    if (onProgress != null) {
+      _progressCallbacks[turnId] = onProgress;
+      final List<CodexTurnProgress>? earlyProgress = _earlyProgress.remove(
+        turnId,
+      );
+      if (earlyProgress != null) {
+        for (final CodexTurnProgress progress in earlyProgress) {
+          _emitTurnProgress(progress);
+        }
+      }
+    }
+    final Future<String> result = _finishTurn(turnId, completion.future)
+        .whenComplete(() {
+          _progressCallbacks.remove(turnId);
+          _earlyProgress.remove(turnId);
+          _turnReasoningSummaries.remove(turnId);
+        });
+    return CodexTurnHandle(threadId: threadId, turnId: turnId, result: result);
   }
 
   Future<String> _finishTurn(
@@ -549,11 +588,60 @@ final class CodexAppServerClient {
       return;
     }
     switch (method) {
+      case 'turn/started':
+        final Object? rawTurn = params['turn'];
+        if (rawTurn is Map<String, Object?> && rawTurn['id'] is String) {
+          _emitTurnProgress(
+            CodexTurnProgress(
+              turnId: rawTurn['id']! as String,
+              sectionIndex: -1,
+              text: 'Анализирую документ…',
+              kind: CodexTurnProgressKind.status,
+            ),
+          );
+        }
       case 'item/agentMessage/delta':
         final String? turnId = params['turnId'] as String?;
         final String? delta = params['delta'] as String?;
         if (turnId != null && delta != null) {
           _turnDeltas.putIfAbsent(turnId, StringBuffer.new).write(delta);
+        }
+      case 'item/reasoning/summaryTextDelta':
+        final String? turnId = params['turnId'] as String?;
+        final String? delta = params['delta'] as String?;
+        final int summaryIndex = params['summaryIndex'] is int
+            ? params['summaryIndex']! as int
+            : 0;
+        if (turnId != null && delta != null) {
+          final Map<int, StringBuffer> summaries = _turnReasoningSummaries
+              .putIfAbsent(turnId, () => <int, StringBuffer>{});
+          final StringBuffer summary = summaries.putIfAbsent(
+            summaryIndex,
+            StringBuffer.new,
+          )..write(delta);
+          _emitTurnProgress(
+            CodexTurnProgress(
+              turnId: turnId,
+              sectionIndex: summaryIndex,
+              text: summary.toString(),
+              kind: CodexTurnProgressKind.reasoningSummary,
+            ),
+          );
+        }
+      case 'item/started':
+        final String? turnId = params['turnId'] as String?;
+        final Object? item = params['item'];
+        if (turnId != null &&
+            item is Map<String, Object?> &&
+            item['type'] == 'agentMessage') {
+          _emitTurnProgress(
+            CodexTurnProgress(
+              turnId: turnId,
+              sectionIndex: 1000000,
+              text: 'Формирую итоговый результат…',
+              kind: CodexTurnProgressKind.status,
+            ),
+          );
         }
       case 'item/completed':
         final String? turnId = params['turnId'] as String?;
@@ -563,6 +651,11 @@ final class CodexAppServerClient {
             item['type'] == 'agentMessage' &&
             item['text'] is String) {
           _turnFinalMessages[turnId] = item['text']! as String;
+        }
+        if (turnId != null &&
+            item is Map<String, Object?> &&
+            item['type'] == 'reasoning') {
+          _replaceReasoningSummaries(turnId, item['summary']);
         }
       case 'turn/completed':
         final Object? rawTurn = params['turn'];
@@ -575,6 +668,49 @@ final class CodexAppServerClient {
             completer.complete(params);
           }
         }
+    }
+  }
+
+  void _replaceReasoningSummaries(String turnId, Object? rawSummaries) {
+    if (rawSummaries is! List<Object?>) {
+      return;
+    }
+    final Map<int, StringBuffer> summaries = _turnReasoningSummaries
+        .putIfAbsent(turnId, () => <int, StringBuffer>{});
+    for (int index = 0; index < rawSummaries.length; index++) {
+      final String? text = _reasoningSummaryText(rawSummaries[index]);
+      if (text == null || text.trim().isEmpty) {
+        continue;
+      }
+      summaries[index] = StringBuffer(text);
+      _emitTurnProgress(
+        CodexTurnProgress(
+          turnId: turnId,
+          sectionIndex: index,
+          text: text,
+          kind: CodexTurnProgressKind.reasoningSummary,
+        ),
+      );
+    }
+  }
+
+  void _emitTurnProgress(CodexTurnProgress progress) {
+    final CodexTurnProgressCallback? callback =
+        _progressCallbacks[progress.turnId];
+    if (callback != null) {
+      try {
+        callback(progress);
+      } on Object {
+        // Progress rendering is optional and must not break the active turn.
+      }
+      return;
+    }
+    final List<CodexTurnProgress> early = _earlyProgress.putIfAbsent(
+      progress.turnId,
+      () => <CodexTurnProgress>[],
+    );
+    if (early.length < 1000) {
+      early.add(progress);
     }
   }
 
@@ -615,6 +751,17 @@ final class CodexAppServerClient {
     await _transport.standardInput.close();
     _transport.kill();
   }
+}
+
+String? _reasoningSummaryText(Object? value) {
+  if (value is String) {
+    return value;
+  }
+  if (value is Map<String, Object?>) {
+    final Object? text = value['text'];
+    return text is String ? text : null;
+  }
+  return null;
 }
 
 CodexJsonMap _map(CodexJsonMap source, String key) {

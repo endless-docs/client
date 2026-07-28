@@ -1886,8 +1886,10 @@ final class _AiPanel extends StatefulWidget {
 
 final class _AiPanelState extends State<_AiPanel> {
   final TextEditingController _instruction = TextEditingController();
+  final ScrollController _conversationScroll = ScrollController();
   late final FocusNode _instructionFocus;
   bool _sending = false;
+  int _conversationSignature = 0;
 
   @override
   void initState() {
@@ -1907,6 +1909,7 @@ final class _AiPanelState extends State<_AiPanel> {
     _instruction.removeListener(_instructionChanged);
     _instruction.dispose();
     _instructionFocus.dispose();
+    _conversationScroll.dispose();
     super.dispose();
   }
 
@@ -1983,6 +1986,7 @@ final class _AiPanelState extends State<_AiPanel> {
     final String documentType = document['document_type'] as String? ?? 'plain';
     final bool canEdit = _canEditInstruction;
     final bool canSend = canEdit && _instruction.text.trim().isNotEmpty;
+    _followConversation(controller.aiMessages);
     return ColoredBox(
       color: Theme.of(context).colorScheme.surfaceContainerLowest,
       child: Padding(
@@ -2061,40 +2065,20 @@ final class _AiPanelState extends State<_AiPanel> {
                       ),
                     )
                   : ListView.separated(
+                      key: const ValueKey<String>('ai-conversation'),
+                      controller: _conversationScroll,
                       itemCount: controller.aiMessages.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (BuildContext context, int index) {
                         final AiConversationMessage message =
                             controller.aiMessages[index];
-                        final bool user = message.role == AiMessageRole.user;
-                        return Align(
-                          alignment: user
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: user
-                                  ? Theme.of(
-                                      context,
-                                    ).colorScheme.primaryContainer
-                                  : Theme.of(
-                                      context,
-                                    ).colorScheme.surfaceContainerHigh,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: Text(message.text),
-                            ),
-                          ),
+                        return _AiConversationEntry(
+                          key: ValueKey<String>('ai-message-$index'),
+                          message: message,
                         );
                       },
                     ),
             ),
-            if (controller.aiRunning) ...<Widget>[
-              const LinearProgressIndicator(),
-              const SizedBox(height: 8),
-            ],
             TextField(
               key: const ValueKey<String>('ai-instruction'),
               controller: _instruction,
@@ -2144,6 +2128,127 @@ final class _AiPanelState extends State<_AiPanel> {
                     label: const Text('Отправить'),
                   ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _followConversation(List<AiConversationMessage> messages) {
+    final int signature = Object.hashAll(
+      messages.map(
+        (AiConversationMessage message) =>
+            Object.hash(message.role, message.text, message.active),
+      ),
+    );
+    if (signature == _conversationSignature) {
+      return;
+    }
+    _conversationSignature = signature;
+    final bool shouldFollow =
+        !_conversationScroll.hasClients ||
+        _conversationScroll.position.maxScrollExtent -
+                _conversationScroll.position.pixels <
+            64;
+    if (!shouldFollow) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_conversationScroll.hasClients) {
+        return;
+      }
+      _conversationScroll.jumpTo(_conversationScroll.position.maxScrollExtent);
+    });
+  }
+}
+
+final class _AiConversationEntry extends StatelessWidget {
+  const _AiConversationEntry({super.key, required this.message});
+
+  final AiConversationMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.role == AiMessageRole.progress) {
+      return _AiProgressEntry(message: message);
+    }
+    final bool user = message.role == AiMessageRole.user;
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: user ? colors.primaryContainer : colors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Text(message.text),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _AiProgressEntry extends StatelessWidget {
+  const _AiProgressEntry({required this.message});
+
+  final AiConversationMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme colors = theme.colorScheme;
+    return Semantics(
+      label: message.active ? 'Codex работает' : 'Ход работы Codex',
+      liveRegion: message.active,
+      child: Container(
+        key: ValueKey<String>(
+          message.active ? 'ai-progress-active' : 'ai-progress-complete',
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: message.active
+                  ? Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: colors.primary,
+                      ),
+                    )
+                  : Icon(Icons.auto_awesome, size: 18, color: colors.primary),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    message.active ? 'Codex работает' : 'Ход работы',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: colors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    message.text,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
